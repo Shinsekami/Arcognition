@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import os
+
 import sys
 from typing import List
 
 import requests
-from dotenv import load_dotenv
 
 
 class ReverseSearch:
     """Interface to the local reverse image search API."""
 
+    REVERSE_SEARCH_ENDPOINT = "http://localhost:3000/reverse"
+
     def __init__(self, endpoint: str | None = None) -> None:
-        load_dotenv()
-        self.endpoint = endpoint or os.getenv("REVERSE_SEARCH_ENDPOINT")
-        if not self.endpoint:
-            print("❌ REVERSE_SEARCH_ENDPOINT is missing from .env")
-            sys.exit(1)
+        self.endpoint = endpoint or self.REVERSE_SEARCH_ENDPOINT
 
     def search(self, image_path: str) -> List[str]:
         """Submit image and return product links."""

@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import os
 from typing import Dict, Optional
 
 import requests
-from dotenv import load_dotenv
-
 
 class GoogleShoppingScraper:
     """Scrape product data from a Google Shopping link."""
 
     def __init__(self) -> None:
-        load_dotenv()
-        self.token = os.getenv("APIFY_TOKEN")
+        # Token for the Apify Google Shopping actor. Replace with your own
+        # token if you deploy your own instance.
+        self.token = "YOUR_APIFY_TOKEN"
         self.endpoint = (
             "https://api.apify.com/v2/acts/apify~google-shopping-scraper/run-sync-get-dataset-items"
         )
@@ -22,7 +20,7 @@ class GoogleShoppingScraper:
     def scrape(self, url: str) -> Optional[Dict]:
         """Scrape product page and return key data."""
         if not self.token:
-            raise RuntimeError("APIFY_TOKEN not set in .env")
+            raise RuntimeError("APIFY token is missing")
 
         payload = {"productUrls": [url], "maxItems": 1}
         params = {"token": self.token}

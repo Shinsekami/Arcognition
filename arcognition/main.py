@@ -2,15 +2,6 @@
 
 from __future__ import annotations
 
-from dotenv import load_dotenv
-load_dotenv()
-
-import os
-print(
-    "\u2705 GOOGLE_VISION_API_KEY loaded:",
-    os.getenv("GOOGLE_VISION_API_KEY")[:6] + "..." if os.getenv("GOOGLE_VISION_API_KEY") else "None",
-)
-
 import argparse
 from typing import List
 

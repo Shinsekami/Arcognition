@@ -3,24 +3,22 @@
 from __future__ import annotations
 
 import base64
-import os
 import sys
 from typing import List, Dict
 
 import cv2
 import requests
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 class FurnitureDetector:
     """Detect furniture items in an image using Google Vision API."""
 
+    GOOGLE_VISION_API_KEY = "AIzaSyDFPzGNHo_YYKZBWzDzKuxroncrgV6tGrw"
+
     def __init__(self) -> None:
-        self.api_key = os.getenv("GOOGLE_VISION_API_KEY")
+        self.api_key = self.GOOGLE_VISION_API_KEY
         if not self.api_key:
-            print("❌ GOOGLE_VISION_API_KEY is missing from .env")
+            print("❌ GOOGLE_VISION_API_KEY is missing")
             sys.exit(1)
         self.endpoint = (
             f"https://vision.googleapis.com/v1/images:annotate?key={self.api_key}"

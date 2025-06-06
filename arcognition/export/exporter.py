@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from typing import List, Dict
 
 import pandas as pd
-from dotenv import load_dotenv
+
 
 
 class ExcelExporter:
     """Export collected data to an Excel spreadsheet."""
 
     def __init__(self, output_file: str = "arcognition_report.xlsx") -> None:
-        load_dotenv()
         self.output_file = output_file
 
     def export(self, rows: List[Dict]) -> str:
