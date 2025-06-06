@@ -13,7 +13,6 @@ class AmazonScraper:
     def __init__(self) -> None:
         # Token for the Apify Amazon actor. Replace with your own if required.
         self.token = "YOUR_APIFY_TOKEN"
-
         self.endpoint = (
             "https://api.apify.com/v2/acts/epctex~amazon-scraper/run-sync-get-dataset-items"
         )
@@ -22,7 +21,6 @@ class AmazonScraper:
         """Scrape an Amazon product page and return key data."""
         if not self.token:
             raise RuntimeError("APIFY token is missing")
-
 
         payload = {
             "startUrls": [{"url": url}],

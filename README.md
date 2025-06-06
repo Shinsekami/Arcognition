@@ -18,4 +18,3 @@ The resulting spreadsheet `arcognition_report.xlsx` will contain product names,
 prices, websites and links.
 
 Visit this app at: https://Shinsekami.github.io/Arcognition
-
