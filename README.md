@@ -1,36 +1,17 @@
 # Arcognition
 
-Arcognition detects furniture items in a room image, performs reverse image search,
-scrapes product information and produces an Excel report sorted by price.
+Arcognition is a simple online tool that finds furniture from any room image and gathers shopping links.
 
-## Usage
+[**Open Arcognition**](https://<your-username>.github.io/Arcognition)
 
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Run the pipeline:
-   ```bash
-   python -m arcognition.main path/to/image.jpg
-   ```
+## How It Works
+1. Upload an image or paste a direct image URL.
+2. Click **Process** and wait a few seconds.
+3. Download the Excel report listing furniture items, prices, websites, and links.
 
-The resulting spreadsheet `arcognition_report.xlsx` will contain product names,
-prices, websites and links.
+Use it to identify pieces from moodboards, real rooms, or 3D renders and quickly compare prices.
 
-Visit this app at: https://<your-username>.github.io/Arcognition
+---
 
-## Deploying the Backend
-
-The FastAPI backend lives in `backend/`. Build and deploy it to Google Cloud Run
-using Cloud Build:
-
-```bash
-gcloud builds submit --config backend/cloudbuild.yaml backend/
-```
-
-Once deployed, update `web/script.js` (and the root `script.js`) with your Cloud
-Run URL so the frontend can POST images to:
-
-```
-https://arcognition-api-<your-cloud-run-url>.run.app/process
-```
+### ⚙️ For Developers
+The backend runs on Google Cloud Run using FastAPI to handle detection, reverse search, and scraping before returning an Excel file.
