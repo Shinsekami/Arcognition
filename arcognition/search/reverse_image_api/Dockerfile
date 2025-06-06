@@ -1,6 +1,9 @@
-FROM node:20-slim
+FROM node:18
+
 WORKDIR /app
-COPY package.json yarn.lock ./
-RUN yarn install --production --frozen-lockfile
 COPY . .
-CMD ["node","src/app.js"]
+
+RUN npm install
+
+EXPOSE 8080
+CMD ["node", "src/app.js"]

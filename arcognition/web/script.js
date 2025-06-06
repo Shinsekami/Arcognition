@@ -1,5 +1,6 @@
 const GOOGLE_API_KEY = "AIzaSyDFPzGNHo_YYKZBWzDzKuxroncrgV6tGrw";
 const API_URL = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_API_KEY}`;
+const REVERSE_SEARCH_API = "https://arcognition-search-<your-region>.a.run.app/reverse";
 
 const imageFileInput = document.getElementById('imageFile');
 const imageUrlInput = document.getElementById('imageUrl');
@@ -14,6 +15,7 @@ const resultsBody = document.getElementById('resultsBody');
 let selectedFile = null;
 let imageUrl = '';
 let resultsData = [];
+let reverseLinks = [];
 
 function showPreview(src) {
     previewImg.src = src;
@@ -72,12 +74,16 @@ function blobToBase64(blob) {
     });
 }
 
-async function getImageBase64() {
+async function getImageBlob() {
     if (selectedFile) {
-        return await blobToBase64(selectedFile);
+        return selectedFile;
     }
     const res = await fetch(imageUrl);
-    const blob = await res.blob();
+    return await res.blob();
+}
+
+async function getImageBase64() {
+    const blob = await getImageBlob();
     return await blobToBase64(blob);
 }
 
@@ -116,6 +122,19 @@ function fillTable(annotations) {
     resultsTable.classList.remove('hidden');
 }
 
+async function reverseSearch(blob) {
+    const file = blob instanceof File ? blob : new File([blob], 'image.jpg');
+    const formData = new FormData();
+    formData.append('image', file);
+    const resp = await fetch(REVERSE_SEARCH_API, {
+        method: 'POST',
+        body: formData
+    });
+    if (!resp.ok) throw new Error('Reverse search error');
+    const data = await resp.json();
+    return data.urls || data.links || [];
+}
+
 processBtn.addEventListener('click', async () => {
     if (!selectedFile && !imageUrl) {
         alert('Please provide an image file or URL.');
@@ -128,7 +147,8 @@ processBtn.addEventListener('click', async () => {
     resultsTable.classList.add('hidden');
 
     try {
-        const base64 = await getImageBase64();
+        const blob = await getImageBlob();
+        const base64 = await blobToBase64(blob);
         const payload = {
             requests: [{
                 image: { content: base64 },
@@ -145,6 +165,8 @@ processBtn.addEventListener('click', async () => {
         const annotations = data.responses?.[0]?.localizedObjectAnnotations || [];
         drawBoxes(annotations);
         fillTable(annotations);
+        reverseLinks = await reverseSearch(blob);
+        console.log('Reverse search links:', reverseLinks);
         downloadLink.classList.remove('hidden');
     } catch (err) {
         console.error(err);

@@ -14,4 +14,4 @@ Use it to identify pieces from moodboards, real rooms, or 3D renders and quickly
 ---
 
 ### ⚙️ For Developers
-The backend runs on Google Cloud Run using FastAPI to handle detection, reverse search, and scraping before returning an Excel file.
+The backend runs on Google Cloud Run using FastAPI to handle detection, reverse search, and scraping before returning an Excel file. The reverse search component comes from the open-source [google-reverse-image-api](https://github.com/SOME-1HING/google-reverse-image-api) and is containerized under `arcognition/search/reverse_image_api/`.
