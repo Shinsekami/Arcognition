@@ -1,0 +1,1 @@
+from .furniture_detector import FurnitureDetector
