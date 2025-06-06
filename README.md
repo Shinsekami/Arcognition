@@ -2,16 +2,21 @@
 
 Arcognition is a simple online tool that finds furniture from any room image and gathers shopping links.
 
-[**Open Arcognition**](https://<your-username>.github.io/Arcognition)
+[**Open Arcognition**](https://shinsekami.github.io/Arcognition)
 
-## How It Works
-1. Upload an image or paste a direct image URL.
-2. Click **Process** and wait a few seconds.
-3. Download the Excel report listing furniture items, prices, websites, and links.
+## How to use
+1. Open **https://shinsekami.github.io/Arcognition**
+2. Upload an image **or** paste an image URL.
+3. Click **Process** and wait a few seconds.
+4. Download the Excel report.
 
 Use it to identify pieces from moodboards, real rooms, or 3D renders and quickly compare prices.
 
 ---
 
 ### ⚙️ For Developers
-The backend runs on Google Cloud Run using FastAPI to handle detection, reverse search, and scraping before returning an Excel file. The reverse search component comes from the open-source [google-reverse-image-api](https://github.com/SOME-1HING/google-reverse-image-api) and is containerized under `arcognition/search/reverse_image_api/`.
+• Vision detection and URL→base64 proxy run on Supabase Edge Functions:
+  • `detect` → https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/detect
+  • `download_image` → https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/download_image
+• Reverse image search runs on Cloud Run (`/reverse`).
+• No keys or setup required for end-users.

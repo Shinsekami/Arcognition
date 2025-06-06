@@ -1,7 +1,6 @@
-const GOOGLE_API_KEY = "AIzaSyDFPzGNHo_YYKZBWzDzKuxroncrgV6tGrw";
-const API_URL = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_API_KEY}`;
-const REVERSE_SEARCH_API = "https://arcognition-search-<your-region>.a.run.app/reverse";
-const DOWNLOAD_IMAGE_URL = "https://arcognition-api-<your-cloud-run>.a.run.app/download-image";
+const DETECT_API = "https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/detect";
+const DOWNLOAD_IMAGE_API = "https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/download_image";
+const REVERSE_SEARCH_API = "https://arcognition-search-xxxxx.a.run.app/reverse";
 
 const imageFileInput = document.getElementById('imageFile');
 const imageUrlInput = document.getElementById('imageUrl');
@@ -40,7 +39,7 @@ imageUrlInput.addEventListener('input', async () => {
     selectedFile = null;
     if (imageUrl) {
         try {
-            const resp = await fetch(DOWNLOAD_IMAGE_URL, {
+            const resp = await fetch(DOWNLOAD_IMAGE_API, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ url: imageUrl })
@@ -103,7 +102,7 @@ async function getImageBlob() {
     if (selectedFile) {
         return selectedFile;
     }
-    const resp = await fetch(DOWNLOAD_IMAGE_URL, {
+    const resp = await fetch(DOWNLOAD_IMAGE_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: imageUrl })
@@ -187,7 +186,7 @@ processBtn.addEventListener('click', async () => {
                 features: [{ type: 'OBJECT_LOCALIZATION' }]
             }]
         };
-        const response = await fetch(API_URL, {
+        const response = await fetch(DETECT_API, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
