@@ -128,7 +128,6 @@ async function callDetect(base64) {
     if (!data.ok) throw new Error(`Vision API error: ${data.stage} – ${data.detail}`);
     return data.annotations;
 }
-
 function drawBoxes(annotations) {
     const ctx = canvas.getContext('2d');
     canvas.width = previewImg.naturalWidth;

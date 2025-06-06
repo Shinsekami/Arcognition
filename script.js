@@ -128,7 +128,6 @@ async function callDetect(base64) {
     if (!data.ok) throw new Error(`Vision API error: ${data.stage} – ${data.detail}`);
     return data.annotations;
 }
-
 function drawBoxes(annotations) {
     const ctx = canvas.getContext('2d');
     canvas.width = previewImg.naturalWidth;
@@ -192,6 +191,7 @@ processBtn.addEventListener('click', async () => {
         const blob = await getImageBlob();
         const base64 = await blobToBase64(blob);
         const annotations = await callDetect(base64);
+
         drawBoxes(annotations);
         fillTable(annotations);
         reverseLinks = await reverseSearch(blob);
@@ -200,6 +200,7 @@ processBtn.addEventListener('click', async () => {
     } catch (err) {
         console.error(err);
         alert(err.message);
+
     } finally {
         processBtn.disabled = false;
         processBtn.textContent = 'Process';
