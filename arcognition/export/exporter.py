@@ -7,6 +7,7 @@ from typing import List, Dict
 import pandas as pd
 
 
+
 class ExcelExporter:
     """Export collected data to an Excel spreadsheet."""
 

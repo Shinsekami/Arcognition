@@ -6,7 +6,6 @@ from typing import Dict, Optional
 
 import requests
 
-
 class GoogleShoppingScraper:
     """Scrape product data from a Google Shopping link."""
 
