@@ -1,6 +1,7 @@
 const GOOGLE_API_KEY = "AIzaSyDFPzGNHo_YYKZBWzDzKuxroncrgV6tGrw";
 const API_URL = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_API_KEY}`;
 const REVERSE_SEARCH_API = "https://arcognition-search-<your-region>.a.run.app/reverse";
+const DOWNLOAD_IMAGE_URL = "https://arcognition-api-<your-cloud-run>.a.run.app/download-image";
 
 const imageFileInput = document.getElementById('imageFile');
 const imageUrlInput = document.getElementById('imageUrl');
@@ -34,11 +35,25 @@ imageFileInput.addEventListener('change', () => {
     }
 });
 
-imageUrlInput.addEventListener('input', () => {
+imageUrlInput.addEventListener('input', async () => {
     imageUrl = imageUrlInput.value.trim();
     selectedFile = null;
     if (imageUrl) {
-        showPreview(imageUrl);
+        try {
+            const resp = await fetch(DOWNLOAD_IMAGE_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: imageUrl })
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                showPreview('data:image/jpeg;base64,' + data.base64);
+            } else {
+                showPreview('');
+            }
+        } catch {
+            showPreview('');
+        }
     }
 });
 
@@ -74,12 +89,29 @@ function blobToBase64(blob) {
     });
 }
 
+function base64ToBlob(base64) {
+    const binStr = atob(base64);
+    const len = binStr.length;
+    const arr = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        arr[i] = binStr.charCodeAt(i);
+    }
+    return new Blob([arr], { type: 'image/jpeg' });
+}
+
 async function getImageBlob() {
     if (selectedFile) {
         return selectedFile;
     }
-    const res = await fetch(imageUrl);
-    return await res.blob();
+    const resp = await fetch(DOWNLOAD_IMAGE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: imageUrl })
+    });
+    if (!resp.ok) throw new Error('Download failed');
+    const data = await resp.json();
+    const base64 = data.base64;
+    return base64ToBlob(base64);
 }
 
 async function getImageBase64() {

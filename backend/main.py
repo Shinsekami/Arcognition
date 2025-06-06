@@ -3,8 +3,9 @@ import os
 from io import BytesIO
 from typing import List
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.responses import FileResponse
+import requests
 from pydantic import BaseModel
 
 from arcognition.detectors import FurnitureDetector
@@ -73,3 +74,19 @@ async def process(image: UploadFile = File(None), payload: ImageRequest | None =
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename="arcognition_report.xlsx",
     )
+
+
+@app.post("/download-image")
+async def download_image(request: Request):
+    """Proxy image download to bypass CORS restrictions."""
+    data = await request.json()
+    url = data.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL missing")
+    try:
+        resp = requests.get(url, timeout=20)
+        resp.raise_for_status()
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=400, detail=f"Failed to download image: {exc}") from exc
+    encoded = base64.b64encode(resp.content).decode("utf-8")
+    return {"base64": encoded}
