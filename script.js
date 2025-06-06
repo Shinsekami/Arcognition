@@ -1,4 +1,4 @@
-const BACKEND_PIPELINE_URL = "https://your-cloud-run-url/image-process";
+const BACKEND_PIPELINE_URL = "https://arcognition-api-<your-cloud-run-url>.run.app/process";
 
 const imageFileInput = document.getElementById('imageFile');
 const imageUrlInput = document.getElementById('imageUrl');

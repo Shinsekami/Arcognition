@@ -9,9 +9,11 @@ import requests
 
 
 class ReverseSearch:
-    """Interface to the local reverse image search API."""
+    """Interface to the deployed reverse image search API."""
 
-    REVERSE_SEARCH_ENDPOINT = "http://localhost:3000/reverse"
+    REVERSE_SEARCH_ENDPOINT = (
+        "https://arcognition-search-<your-project>.run.app/reverse"
+    )
 
     def __init__(self, endpoint: str | None = None) -> None:
         self.endpoint = endpoint or self.REVERSE_SEARCH_ENDPOINT

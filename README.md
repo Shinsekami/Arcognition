@@ -17,4 +17,20 @@ scrapes product information and produces an Excel report sorted by price.
 The resulting spreadsheet `arcognition_report.xlsx` will contain product names,
 prices, websites and links.
 
-Visit this app at: https://Shinsekami.github.io/Arcognition
+Visit this app at: https://<your-username>.github.io/Arcognition
+
+## Deploying the Backend
+
+The FastAPI backend lives in `backend/`. Build and deploy it to Google Cloud Run
+using Cloud Build:
+
+```bash
+gcloud builds submit --config backend/cloudbuild.yaml backend/
+```
+
+Once deployed, update `web/script.js` (and the root `script.js`) with your Cloud
+Run URL so the frontend can POST images to:
+
+```
+https://arcognition-api-<your-cloud-run-url>.run.app/process
+```
