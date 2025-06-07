@@ -1,47 +1,91 @@
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener('DOMContentLoaded', () => {
   const log = (...args) => console.log('[Arcognition]', ...args);
-  // Grab elements safely
+
+  // DOM elements
   const fileInput = document.querySelector('input[type="file"]');
-  const urlInput =
-    document.querySelector('#urlInput') ||
-    document.querySelector('#imageUrl') ||
-    document.querySelector('input[name="url"]');
-  const processBtn =
-    document.querySelector('#processBtn') ||
-    document.querySelector('button[type="submit"]');
+  const urlInput = document.querySelector('#urlInput');
+  const processBtn = document.querySelector('#processBtn');
   const preview = document.querySelector('#preview');
   const canvas = document.querySelector('#canvas');
-  const ctx = canvas?.getContext('2d');
+  const ctx = canvas.getContext('2d');
   const resultsTable = document.querySelector('#resultsTable');
   const resultsBody = document.querySelector('#resultsBody');
   const downloadLink = document.querySelector('#downloadLink');
 
-  if (!processBtn || !preview || !canvas || !ctx) {
-    console.error('Required elements missing');
+  if (
+    !fileInput ||
+    !urlInput ||
+    !processBtn ||
+    !preview ||
+    !canvas ||
+    !ctx ||
+    !resultsTable ||
+    !resultsBody ||
+    !downloadLink
+  ) {
+    console.error('[Arcognition] Missing UI elements');
     return;
   }
-  log('DOM loaded');
 
-  /* ---------- API endpoints ---------- */
-  const SUPABASE = "https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1";
-  const DOWNLOAD_IMAGE_API = `${SUPABASE}/download_image`;
-  const DETECT_API         = `${SUPABASE}/detect`;
+  // Endpoints
+  const SUPABASE_URL = 'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1';
+  const DOWNLOAD_IMAGE_API = `${SUPABASE_URL}/download_image`;
+  const DETECT_API = `${SUPABASE_URL}/detect`;
   const REVERSE_SEARCH_API =
-    "https://arcognition-search-490571042366.us-central1.run.app/reverse";
+    'https://arcognition-search-skujvj7jba-uc.a.run.app/reverse';
 
-  /* ---------- helper wrappers ---------- */
-  const fetchJson = (url, opts) => fetch(url, opts).then(r => r.json());
-
-  function drawBoxes(anns) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    anns.forEach(a => {
-      const { x, y, w, h } = a.bbox || {};
-      ctx.strokeStyle = 'red';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x, y, w, h);
+  // Helper to fetch JSON
+  const fetchJson = (url, opts) =>
+    fetch(url, opts).then(async r => {
+      const text = await r.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new Error(`Invalid JSON from ${url}: ${text}`);
+      }
     });
+
+  // Download URL → base64
+  async function downloadToBase64(url) {
+    log('Downloading image:', url);
+    const res = await fetchJson(DOWNLOAD_IMAGE_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.base64) throw new Error('download_image failed');
+    log('Downloaded base64 length:', res.base64.length);
+    return res.base64;
   }
 
+  // Call Vision detect
+  async function detect(base64) {
+    log('Calling detect API');
+    const res = await fetchJson(DETECT_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64 }),
+    });
+    if (!Array.isArray(res.annotations)) throw new Error('detect API failed');
+    log('Annotations:', res.annotations.length);
+    return res.annotations;
+  }
+
+  // Call your reverse-search service
+  async function reverseSearch(base64, annotation) {
+    log('Reverse search for:', annotation.name);
+    const resp = await fetch(REVERSE_SEARCH_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64, annotations: [annotation] }),
+    });
+    log('Status:', resp.status);
+    const json = await resp.json();
+    log('Payload:', json);
+    return Array.isArray(json.data?.results) ? json.data.results : [];
+  }
+
+  // Crop thumbnail client-side
   async function cropBlobFromBox(img, box) {
     const c = document.createElement('canvas');
     c.width = box.w;
@@ -51,151 +95,104 @@ document.addEventListener("DOMContentLoaded", () => {
     return await new Promise(res => c.toBlob(res, 'image/jpeg'));
   }
 
-  async function downloadToBase64(url) {
-    log('Downloading image', url);
-    const res = await fetchJson(DOWNLOAD_IMAGE_API, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({url})
-    });
-    if (!res.ok) {
-      log('download_image failed', res);
-      throw new Error(`download_image: ${res.detail}`);
-    }
-    log('Downloaded image - length', res.base64?.length);
-    return res.base64;
-  }
-
-  async function detect(base64) {
-    log('Calling detect API');
-    const res = await fetchJson(DETECT_API, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({base64})
-    });
-    if (!res.ok) {
-      log('detect failed', res);
-      throw new Error(`Vision API: ${res.stage} – ${res.detail}`);
-    }
-    log('Detection success, annotations', res.annotations);
-    return res.annotations;
-  }
-
-  async function reverseSearch(blob) {
-    log('Calling reverse search');
-    const fd = new FormData();
-    fd.append("image", blob, "crop.jpg");
-    const res = await fetchJson(REVERSE_SEARCH_API, {method:"POST", body:fd});
-    log('Reverse search response', res);
-    return res;
-  }
-
-  /* ---------- main click handler ---------- */
-  processBtn.addEventListener("click", async e => {
+  processBtn.addEventListener('click', async e => {
     e.preventDefault();
-    log('Process button clicked');
+    log('Process clicked');
     processBtn.disabled = true;
-    resultsBody.innerHTML = "";
-    downloadLink.classList.add("hidden");
+    resultsBody.innerHTML = '';
+    resultsTable.classList.add('hidden');
+    downloadLink.classList.add('hidden');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
     try {
-      // 1. get image as base64 and preview
+      // 1) Load image
       let base64, blob;
-      if (fileInput && fileInput.files.length) {
+      if (fileInput.files.length) {
         blob = fileInput.files[0];
         base64 = await new Promise((res, rej) => {
           const fr = new FileReader();
-          fr.onload = () => res(fr.result.split(",")[1]);
+          fr.onload = () => res(fr.result.split(',')[1]);
           fr.onerror = rej;
           fr.readAsDataURL(blob);
         });
         preview.src = URL.createObjectURL(blob);
-      } else if (urlInput && urlInput.value.trim()) {
+      } else if (urlInput.value.trim()) {
         base64 = await downloadToBase64(urlInput.value.trim());
-        blob = await fetch(`data:image/jpeg;base64,${base64}`).then(r => r.blob());
+        blob = await fetch(`data:image/jpeg;base64,${base64}`).then(r =>
+          r.blob()
+        );
         preview.src = `data:image/jpeg;base64,${base64}`;
       } else {
-        alert("Provide an image file or URL");
+        alert('Provide a file or URL');
         return;
       }
 
-      log('Image prepared', { fromFile: !!(fileInput && fileInput.files.length), length: base64.length });
-
-      await new Promise(res => (preview.onload = res));
+      await new Promise(r => (preview.onload = r));
       canvas.width = preview.naturalWidth;
       canvas.height = preview.naturalHeight;
-      canvas.classList.remove("hidden");
+      ctx.drawImage(preview, 0, 0);
 
-      // 2. detect objects
+      // 2) Detect
       const annotations = await detect(base64);
       if (!annotations.length) {
-        alert("No objects found");
+        alert('No objects detected');
         return;
       }
 
-      log('Annotations found', annotations.length);
-
-      drawBoxes(annotations);
-
+      // 3) Reverse-search & render
       const excelRows = [];
+      resultsTable.classList.remove('hidden');
+
       for (const ann of annotations) {
-        if (!ann.bbox) continue;
-        log('Processing item', ann.name, ann.bbox);
-        let crop;
-        try {
-          log('Cropping image');
-          crop = await cropBlobFromBox(preview, ann.bbox);
-          log('Crop ready', crop.size);
-        } catch (err) {
-          console.error('Crop failed', err);
-          continue;
-        }
-        log('Sending to reverse search');
-        let items = [];
-        try {
-          const res = await reverseSearch(crop);
-          items = res.results || [];
-          log('Reverse search results', items.length);
-        } catch (err) {
-          console.error('reverseSearch failed', err);
-        }
+        log('Processing:', ann.name);
+        // Show thumbnail locally
+        const thumbBlob = await cropBlobFromBox(preview, ann.bbox);
+        // Perform server-side reverse search
+        const items = await reverseSearch(base64, ann);
+        log('Found items:', items.length);
+
         if (!items.length) {
-          log('No matches for', ann.name);
-          const tr = document.createElement("tr");
-          tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1" colspan="2">No matches found</td>`;
-          resultsBody.appendChild(tr);
+          resultsBody.insertAdjacentHTML(
+            'beforeend',
+            `<tr><td>${ann.name}</td><td colspan="2">No matches found</td></tr>`
+          );
           excelRows.push({ Item: ann.name, Site: '', Price: '', Link: '' });
-          continue;
+        } else {
+          items.slice(0, 5).forEach(it => {
+            resultsBody.insertAdjacentHTML(
+              'beforeend',
+              `<tr>
+                 <td>${ann.name}</td>
+                 <td><a href="${it.url}" target="_blank">${it.site}</a></td>
+                 <td>€${it.price_eur}</td>
+               </tr>`
+            );
+            excelRows.push({
+              Item: ann.name,
+              Site: it.site,
+              Price: it.price_eur,
+              Link: it.url,
+            });
+          });
         }
-        log('Adding rows for', ann.name);
-        items.slice(0, 5).forEach((it) => {
-          const tr = document.createElement("tr");
-          const thumb = it.thumbnail ? `<img src="${it.thumbnail}" class="w-12 h-12 object-contain" />` : "";
-          tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1"><a href="${it.url}" target="_blank" class="text-blue-600 underline">${it.site}</a></td><td class="px-2 py-1">${it.price_eur ?? ""}</td><td class="px-2 py-1">${thumb}</td>`;
-          resultsBody.appendChild(tr);
-          excelRows.push({ Item: ann.name, Site: it.site, Price: it.price_eur, Link: it.url });
-          log('Row added', it.url, it.price_eur);
-        });
       }
-      resultsTable.classList.remove("hidden");
 
-      log('Generating Excel with rows', excelRows.length);
-
+      // 4) Export Excel
+      log('Generating Excel rows:', excelRows.length);
       if (excelRows.length) {
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(excelRows);
-        XLSX.utils.book_append_sheet(wb, ws, "Results");
-        const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-        const excelBlob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-        downloadLink.href = URL.createObjectURL(excelBlob);
-        downloadLink.download = "arcognition_report.xlsx";
-        downloadLink.classList.remove("hidden");
-        log('Excel ready for download');
+        XLSX.utils.book_append_sheet(wb, ws, 'Report');
+        const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([out], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        downloadLink.href = URL.createObjectURL(blob);
+        downloadLink.download = 'arcognition_report.xlsx';
+        downloadLink.classList.remove('hidden');
       }
-
     } catch (err) {
       console.error(err);
-      log('Processing failed', err);
       alert(err.message);
     } finally {
       processBtn.disabled = false;
