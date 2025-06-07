@@ -20,3 +20,11 @@ Use it to identify pieces from moodboards, real rooms, or 3D renders and quickly
   • `download_image` → https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/download_image
 • Reverse image search runs on Cloud Run (`/reverse`).
 • No keys or setup required for end-users.
+
+#### Deployment
+To build and deploy the reverse search API to Cloud Run:
+
+```bash
+gcloud builds submit --config cloudbuild.yaml .
+```
+This containerizes `reverse_image_api/` and deploys it as the `arcognition-search` service in `us-central1`.

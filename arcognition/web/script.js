@@ -118,6 +118,17 @@ async function getImageBase64() {
     return await blobToBase64(blob);
 }
 
+async function callDetect(base64) {
+    const res = await fetch(DETECT_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64 })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(`Vision API error: ${data.stage} – ${data.detail}`);
+    return data.annotations;
+}
+
 function drawBoxes(annotations) {
     const ctx = canvas.getContext('2d');
     canvas.width = previewImg.naturalWidth;
@@ -180,20 +191,7 @@ processBtn.addEventListener('click', async () => {
     try {
         const blob = await getImageBlob();
         const base64 = await blobToBase64(blob);
-        const payload = {
-            requests: [{
-                image: { content: base64 },
-                features: [{ type: 'OBJECT_LOCALIZATION' }]
-            }]
-        };
-        const response = await fetch(DETECT_API, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (!response.ok) throw new Error('Vision API error');
-        const data = await response.json();
-        const annotations = data.responses?.[0]?.localizedObjectAnnotations || [];
+        const annotations = await callDetect(base64);
         drawBoxes(annotations);
         fillTable(annotations);
         reverseLinks = await reverseSearch(blob);
@@ -201,7 +199,7 @@ processBtn.addEventListener('click', async () => {
         downloadLink.classList.remove('hidden');
     } catch (err) {
         console.error(err);
-        alert('Failed to process image.');
+        alert(err.message);
     } finally {
         processBtn.disabled = false;
         processBtn.textContent = 'Process';
