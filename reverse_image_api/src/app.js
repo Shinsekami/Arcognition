@@ -1,33 +1,56 @@
-import express from 'express';
-import cors from 'cors';
-import reverseRouter from './routes/index.js';
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const { ErrorResponseObject } = require("./common/http");
+const routes = require("./routes");
 
 const app = express();
 
-// 1) Parse JSON bodies up to 20 MB
-app.use(express.json({ limit: '20mb' }));
+// Environment variables
+const PORT = process.env.PORT || 5000;
+const ENV = process.env.NODE_ENV || "development";
 
-// 2) Enable CORS (you can restrict origin to your GH-Pages URL if you like)
-app.use(cors({ origin: '*' }));
+// CORS configuration
+const corsOptions = {
+  origin: "*",
+  methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type,Authorization",
+};
 
-// 3) Mount your reverse-search router at /reverse
-app.use('/reverse', reverseRouter);
+// Middleware
+app.use(cors(corsOptions));
+app.use(helmet());
+app.use(express.json({ limit: "1mb" })); // Parse JSON payloads
 
-// 4) Catch-all 404 for any other route
-app.all('*', (_req, res) =>
-  res.status(404).json({ success: false, message: 'Route not defined' })
+// Limit each IP to 100 requests per windowMs
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  message: new ErrorResponseObject(
+    "Too many requests, please try again later."
+  ),
+});
+app.use(limiter);
+
+// Mount routes
+app.use("/", routes);
+
+// Catch-all route for undefined paths
+app.all("*", (req, res) =>
+  res.status(404).json(new ErrorResponseObject("Route not defined"))
 );
 
-// 5) Global error handler
-app.use((err, _req, res, _next) => {
-  console.error('[ERROR]', err);
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error("Server Error:", err.message);
+  const status = err.status || 500;
   res
-    .status(err.status || 500)
-    .json({ success: false, message: err.message || 'Internal Server Error' });
+    .status(status)
+    .json(new ErrorResponseObject(err.message || "Internal Server Error"));
 });
 
-// 6) Start the server
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`⇨ Reverse-Image API listening on port ${PORT}`);
-});
+// Start server
+app.listen(PORT, () =>
+  console.log(`Server running in ${ENV} mode on http://localhost:${PORT}`)
+);

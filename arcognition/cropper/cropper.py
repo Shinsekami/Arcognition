@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
-from typing import Tuple
+import logging
 
 import cv2
+
+
+logger = logging.getLogger(__name__)
 
 
 class Cropper:
@@ -27,6 +30,7 @@ class Cropper:
         Returns:
             Path to the saved cropped image.
         """
+        logger.debug("Cropping from %s with box %s", image_path, bbox)
         img = cv2.imread(image_path)
         if img is None:
             raise FileNotFoundError(f"Image not found: {image_path}")
@@ -40,4 +44,5 @@ class Cropper:
         filename = f"{index}_{name.replace(' ', '_')}.jpg"
         out_path = os.path.join(self.output_dir, filename)
         cv2.imwrite(out_path, cropped)
+        logger.info("Cropped saved to %s (%dx%d)", out_path, w, h)
         return out_path

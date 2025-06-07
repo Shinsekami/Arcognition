@@ -1,97 +1,58 @@
-import { ImageAnnotatorClient } from '@google-cloud/vision';
-import axios from 'axios';
-import { load } from 'cheerio';
+const axios = require("axios");
+const cheerio = require("cheerio");
+const {
+  SuccessResponseObject,
+  ErrorResponseObject,
+} = require("../common/http");
 
-const visionClient = new ImageAnnotatorClient();
-
-// one-time fetch of EUR rates
-let eurRates = null;
-async function getRates() {
-  if (eurRates) return eurRates;
-  const { data } = await axios.get(
-    'https://api.exchangerate.host/latest?base=EUR'
-  );
-  eurRates = data.rates;
-  return eurRates;
-}
-
-// parse “$1,299.99” or “2999 CZK” into { code, amount }
-function extractPrice(str) {
-  const reSym = /([$£¥€])\s?([\d,]+(?:\.\d+)?)/;
-  const reCode = /([\d,]+(?:\.\d+)?)\s?(EUR|USD|GBP|CAD|AUD|JPY|CZK)/i;
-  let m = reSym.exec(str);
-  if (m)
-    return {
-      code: { $: 'USD', '£': 'GBP', '¥': 'JPY', '€': 'EUR' }[m[1]],
-      amount: parseFloat(m[2].replace(/,/g, '')),
+async function reverse(imageUrl) {
+  try {
+    const headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Linux; Android 6.0.1; SM-G920V Build/MMB29K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.98 Mobile Safari/537.36",
     };
-  m = reCode.exec(str);
-  if (m)
-    return {
-      code: m[2].toUpperCase(),
-      amount: parseFloat(m[1].replace(/,/g, '')),
-    };
-  return null;
-}
+    const url = `https://images.google.com/searchbyimage?safe=off&sbisrc=tg&image_url=${imageUrl}`;
+    const response = await axios.get(url, { headers, maxRedirects: 20 });
 
-export default async function reverseSearch(buffer) {
-  // 1) webDetection via Vision
-  const [vd] = await visionClient.webDetection({ image: { content: buffer } });
-  const pages = (vd.webDetection?.pagesWithMatchingImages || []).slice(0, 5);
-  if (!pages.length) return [];
+    const $ = cheerio.load(response.data);
+    const result = { similarUrl: "", resultText: "" };
 
-  // 2) load FX rates
-  const rates = await getRates();
+    const similarInput = $(".gLFyf").first();
+    if (similarInput.length) {
+      const similarImage = similarInput.attr("value");
+      const similarUrl = `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(
+        similarImage
+      )}`;
+      result.similarUrl = similarUrl;
+    } else {
+      return new ErrorResponseObject("Failed to find similar images");
+    }
 
-  // 3) scrape each page (max 3 at a time)
-  const out = [];
-  for (let i = 0; i < pages.length; i += 3) {
-    const batch = pages.slice(i, i + 3).map(async p => {
-      try {
-        const url = p.url;
-        const resp = await axios.get(url, { timeout: 5000 });
-        const $ = load(resp.data, { decodeEntities: true });
+    const outputDiv = $("div.r5a77d").first();
+    if (outputDiv.length) {
+      const output = outputDiv.text();
+      let decodedText = unescape(encodeURIComponent(output));
 
-        // pick a thumbnail: fullMatchingImages has absolute URL
-        let thumb = p.fullMatchingImages?.[0]?.url;
-        if (!thumb) {
-          // fallback to first <img>
-          let src = $('img').first().attr('src') || '';
-          // resolve relative URLs
-          thumb = new URL(src, url).href;
-        }
-
-        // find the first price in text nodes
-        let found = null;
-        $('body *').each((_, el) => {
-          const txt = $(el).text().trim();
-          const pr = extractPrice(txt);
-          if (pr) {
-            found = pr;
-            return false; // break .each
-          }
-        });
-        if (!found) throw new Error('no price');
-
-        // convert to EUR
-        let eur = found.amount;
-        if (found.code !== 'EUR') eur = eur / (rates[found.code] || 1);
-
-        return {
-          site: new URL(url).hostname,
-          url,
-          thumbnail: thumb,
-          price_eur: +eur.toFixed(2),
-        };
-      } catch (err) {
-        // swallow per-page failures
-        return null;
+      if (decodedText.includes("Â")) {
+        decodedText = decodedText.replace(/Â/g, " ");
       }
-    });
+      result.resultText = decodedText;
+    } else {
+      return new ErrorResponseObject("Failed to find text output");
+    }
 
-    const results = await Promise.all(batch);
-    out.push(...results.filter(Boolean));
+    return new SuccessResponseObject("Successfully Got the Result", result);
+  } catch (error) {
+    return new ErrorResponseObject(`Failed to reverse image: ${error.message}`);
   }
-
-  return out;
 }
+
+module.exports = {
+  reverse,
+};
+
+// For Testing
+/* reverse("https://graph.org/file/1668e5e51e612341b945e.jpg")
+  .then((result) => console.log(result["success"]))
+  .catch((error) => console.error(error.message));
+ */

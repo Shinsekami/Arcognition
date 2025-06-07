@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from typing import List, Dict
+import logging
 
 import pandas as pd
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExcelExporter:
@@ -15,7 +19,9 @@ class ExcelExporter:
 
     def export(self, rows: List[Dict]) -> str:
         if not rows:
+            logger.error("No data to export")
             raise ValueError("No data to export")
+        logger.info("Exporting %d rows to %s", len(rows), self.output_file)
 
         df = pd.DataFrame(rows)
         if "Price" in df.columns:

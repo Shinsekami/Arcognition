@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from typing import Dict, Optional
+import logging
 
 import requests
+
+
+logger = logging.getLogger(__name__)
 
 
 class AmazonScraper:
@@ -20,17 +24,22 @@ class AmazonScraper:
     def scrape(self, url: str) -> Optional[Dict]:
         """Scrape an Amazon product page and return key data."""
         if not self.token:
+            logger.error("APIFY token is missing")
             raise RuntimeError("APIFY token is missing")
+        logger.info("Scraping Amazon URL %s", url)
 
         payload = {
             "startUrls": [{"url": url}],
             "maxItems": 1,
         }
         params = {"token": self.token}
-        response = requests.post(self.endpoint, params=params, json=payload, timeout=60)
+        response = requests.post(
+            self.endpoint, params=params, json=payload, timeout=60
+        )
         response.raise_for_status()
         data = response.json()
         if not data:
+            logger.warning("No data returned for %s", url)
             return None
         item = data[0]
         return {

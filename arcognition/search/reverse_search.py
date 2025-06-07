@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 from typing import List
 
 import requests
+
+
+logger = logging.getLogger(__name__)
 
 
 class ReverseSearch:
@@ -18,14 +21,19 @@ class ReverseSearch:
 
     def search(self, image_path: str) -> List[dict]:
         """Submit image and return product info dictionaries."""
+        logger.info("Reverse searching %s", image_path)
         try:
             with open(image_path, "rb") as f:
-                files = {"image": f}
-                response = requests.post(self.endpoint, files=files, timeout=60)
+                img_bytes = f.read()
+            logger.debug("Uploading %d bytes to %s", len(img_bytes), self.endpoint)
+            response = requests.post(
+                self.endpoint, files={"image": img_bytes}, timeout=60
+            )
             response.raise_for_status()
             data = response.json()
             items = data.get("results") or []
+            logger.info("Reverse search returned %d results", len(items))
             return items
         except Exception as exc:  # pylint: disable=broad-except
-            print(f"reverse search failed: {exc}")
+            logger.exception("reverse search failed: %s", exc)
             return []

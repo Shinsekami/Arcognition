@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import base64
+import logging
 from typing import List, Dict
 
 import cv2
 import requests
+
+
+logger = logging.getLogger(__name__)
 
 
 class FurnitureDetector:
@@ -26,11 +30,13 @@ class FurnitureDetector:
 
     def detect(self, image_path: str) -> List[Dict]:
         """Return detected furniture items with bounding boxes."""
+        logger.info("Detecting furniture in %s", image_path)
         img = cv2.imread(image_path)
         if img is None:
             raise FileNotFoundError(f"Image not found: {image_path}")
 
         content = self._encode_image(image_path)
+        logger.debug("Calling detection endpoint %s", self.endpoint)
         response = requests.post(
             self.endpoint,
             json={"base64": content},
@@ -40,9 +46,11 @@ class FurnitureDetector:
         data = response.json()
         if not data.get("ok"):
             detail = data.get("detail", "unknown error")
+            logger.error("Detection failed: %s", detail)
             raise RuntimeError(f"Detection failed: {detail}")
 
         annotations = data.get("annotations", [])
+        logger.info("Detection returned %d items", len(annotations))
 
         results: List[Dict] = []
         if annotations:
