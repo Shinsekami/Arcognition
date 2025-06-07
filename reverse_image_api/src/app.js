@@ -2,18 +2,15 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import router from './routes/index.js';
-import { ErrorResponseObject } from './common/http.js';
+import router from './routes/index.js'; // your download_image, detect & reverse routes
+import { ErrorResponseObject } from '../common/http.js';
 
 const app = express();
 
-// Trust Cloud Run’s proxy (for X-Forwarded-For and rate-limit)
+// 1) Trust Cloud Run’s proxy for rate-limiting behind the load balancer
 app.set('trust proxy', 1);
 
-const PORT = process.env.PORT || 5000;
-const ENV = process.env.NODE_ENV || 'development';
-
-// CORS: only allow your GitHub Pages domain
+// 2) Enable CORS for your GitHub Pages origin (handles preflight OPTIONS too)
 app.use(
   cors({
     origin: 'https://shinsekami.github.io',
@@ -21,14 +18,20 @@ app.use(
     allowedHeaders: 'Content-Type,Authorization',
   })
 );
+app.options(
+  '*',
+  cors({
+    origin: 'https://shinsekami.github.io',
+  })
+);
 
-// Security headers
+// 3) Security headers
 app.use(helmet());
 
-// JSON body parsing (up to 10 MB)
+// 4) Parse JSON bodies (up to 10 MB)
 app.use(express.json({ limit: '10mb' }));
 
-// Rate limiting: 20 requests per minute per IP
+// 5) Rate-limit: 20 requests per minute per IP
 app.use(
   rateLimit({
     windowMs: 1 * 60 * 1000,
@@ -41,15 +44,15 @@ app.use(
   })
 );
 
-// Mount your routes (download_image, detect, reverse)
+// 6) Mount your routes: /download_image, /detect, /reverse
 app.use('/', router);
 
-// 404 handler
-app.all('*', (req, res) => {
-  res.status(404).json(new ErrorResponseObject('Route not defined'));
-});
+// 7) Catch-all 404
+app.all('*', (req, res) =>
+  res.status(404).json(new ErrorResponseObject('Route not defined'))
+);
 
-// Global error handler
+// 8) Global error handler
 app.use((err, req, res, next) => {
   console.error('Server Error:', err);
   const status = err.status || 500;
@@ -58,7 +61,8 @@ app.use((err, req, res, next) => {
     .json(new ErrorResponseObject(err.message || 'Internal Server Error'));
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running in ${ENV} mode on port ${PORT}`);
-});
+// 9) Start the server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () =>
+  console.log(`Reverse‐Image API running on port ${PORT}`)
+);
