@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const DETECT_API =
     'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/detect';
   const REVERSE_SEARCH_API =
-    'https://arcognition-search-skujvj7jba-uc.a.run.app/reverse';
+    'https://arcognition-search-490571042366.us-central1.run.app/reverse';
 
   // helper to fetch JSON
   const fetchJson = (url, opts) =>
