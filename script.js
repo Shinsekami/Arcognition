@@ -1,4 +1,5 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const log = (...args) => console.log('[Arcognition]', ...args);
   // Grab elements safely
   const fileInput = document.querySelector('input[type="file"]');
   const urlInput =
@@ -19,6 +20,7 @@ document.addEventListener("DOMContentLoaded", () => {
     console.error('Required elements missing');
     return;
   }
+  log('DOM loaded');
 
   /* ---------- API endpoints ---------- */
   const SUPABASE = "https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1";
@@ -50,35 +52,48 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function downloadToBase64(url) {
+    log('Downloading image', url);
     const res = await fetchJson(DOWNLOAD_IMAGE_API, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify({url})
     });
-    if (!res.ok) throw new Error(`download_image: ${res.detail}`);
+    if (!res.ok) {
+      log('download_image failed', res);
+      throw new Error(`download_image: ${res.detail}`);
+    }
+    log('Downloaded image - length', res.base64?.length);
     return res.base64;
   }
 
   async function detect(base64) {
+    log('Calling detect API');
     const res = await fetchJson(DETECT_API, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify({base64})
     });
-    if (!res.ok) throw new Error(`Vision API: ${res.stage} – ${res.detail}`);
+    if (!res.ok) {
+      log('detect failed', res);
+      throw new Error(`Vision API: ${res.stage} – ${res.detail}`);
+    }
+    log('Detection success, annotations', res.annotations);
     return res.annotations;
   }
 
   async function reverseSearch(blob) {
+    log('Calling reverse search');
     const fd = new FormData();
     fd.append("image", blob, "crop.jpg");
     const res = await fetchJson(REVERSE_SEARCH_API, {method:"POST", body:fd});
+    log('Reverse search response', res);
     return res;
   }
 
   /* ---------- main click handler ---------- */
   processBtn.addEventListener("click", async e => {
     e.preventDefault();
+    log('Process button clicked');
     processBtn.disabled = true;
     resultsBody.innerHTML = "";
     downloadLink.classList.add("hidden");
@@ -104,6 +119,8 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      log('Image prepared', { fromFile: !!(fileInput && fileInput.files.length), length: base64.length });
+
       await new Promise(res => (preview.onload = res));
       canvas.width = preview.naturalWidth;
       canvas.height = preview.naturalHeight;
@@ -116,11 +133,14 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      log('Annotations found', annotations.length);
+
       drawBoxes(annotations);
 
       const excelRows = [];
       for (const ann of annotations) {
         if (!ann.bbox) continue;
+        log('Processing item', ann.name);
         const crop = await cropBlobFromBox(preview, ann.bbox);
         let items = [];
         try {
@@ -129,6 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (err) {
           console.warn('reverseSearch failed', err);
         }
+        log('Found matches', items.length);
         if (!items.length) {
           const tr = document.createElement("tr");
           tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1" colspan="2">No matches found</td>`;
@@ -146,6 +167,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       resultsTable.classList.remove("hidden");
 
+      log('Generating Excel with rows', excelRows.length);
+
       if (excelRows.length) {
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(excelRows);
@@ -155,10 +178,12 @@ document.addEventListener("DOMContentLoaded", () => {
         downloadLink.href = URL.createObjectURL(excelBlob);
         downloadLink.download = "arcognition_report.xlsx";
         downloadLink.classList.remove("hidden");
+        log('Excel ready for download');
       }
 
     } catch (err) {
       console.error(err);
+      log('Processing failed', err);
       alert(err.message);
     } finally {
       processBtn.disabled = false;
