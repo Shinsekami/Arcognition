@@ -1,28 +1,38 @@
-// reverse_image_api/src/routes/detect.js
-import fetch from 'node-fetch';
+import { ImageAnnotatorClient } from '@google-cloud/vision';
+import { ErrorResponseObject } from '../common/http.js';
+const client = new ImageAnnotatorClient();
 
-const KEY = process.env.GOOGLE_VISION_KEY; // ensure you set this in Cloud Run
-
-export default async function detectObjects(base64) {
-  const payload = {
-    requests: [
-      {
-        image: { content: base64 },
-        features: [{ type: 'OBJECT_LOCALIZATION' }],
-      },
-    ],
-  };
-  const res = await fetch(
-    `https://vision.googleapis.com/v1/images:annotate?key=${KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+export default async function detectHandler(req, res) {
+  try {
+    const { base64 } = req.body;
+    if (!base64) {
+      return res
+        .status(400)
+        .json(new ErrorResponseObject('Missing base64 in request body'));
     }
-  );
-  const json = await res.json();
-  if (res.status !== 200 || json.error) {
-    throw new Error(json.error?.message || 'Vision API error');
+    const [result] = await client.objectLocalization({
+      image: { content: base64 },
+    });
+    const annotations = result.localizedObjectAnnotations.map(obj => ({
+      name: obj.name,
+      score: obj.score,
+      boundingPoly: obj.boundingPoly,
+      bbox: {
+        x: obj.boundingPoly.normalizedVertices[0].x,
+        y: obj.boundingPoly.normalizedVertices[0].y,
+        w:
+          obj.boundingPoly.normalizedVertices[2].x -
+          obj.boundingPoly.normalizedVertices[0].x,
+        h:
+          obj.boundingPoly.normalizedVertices[2].y -
+          obj.boundingPoly.normalizedVertices[0].y,
+      },
+    }));
+    return res.json({ success: true, annotations });
+  } catch (err) {
+    console.error('detect error:', err);
+    return res
+      .status(500)
+      .json(new ErrorResponseObject('Vision detect failed'));
   }
-  return json.responses[0].localizedObjectAnnotations || [];
 }
