@@ -140,29 +140,41 @@ document.addEventListener("DOMContentLoaded", () => {
       const excelRows = [];
       for (const ann of annotations) {
         if (!ann.bbox) continue;
-        log('Processing item', ann.name);
-        const crop = await cropBlobFromBox(preview, ann.bbox);
+        log('Processing item', ann.name, ann.bbox);
+        let crop;
+        try {
+          log('Cropping image');
+          crop = await cropBlobFromBox(preview, ann.bbox);
+          log('Crop ready', crop.size);
+        } catch (err) {
+          console.error('Crop failed', err);
+          continue;
+        }
+        log('Sending to reverse search');
         let items = [];
         try {
           const res = await reverseSearch(crop);
           items = res.results || [];
+          log('Reverse search results', items.length);
         } catch (err) {
-          console.warn('reverseSearch failed', err);
+          console.error('reverseSearch failed', err);
         }
-        log('Found matches', items.length);
         if (!items.length) {
+          log('No matches for', ann.name);
           const tr = document.createElement("tr");
           tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1" colspan="2">No matches found</td>`;
           resultsBody.appendChild(tr);
           excelRows.push({ Item: ann.name, Site: '', Price: '', Link: '' });
           continue;
         }
+        log('Adding rows for', ann.name);
         items.slice(0, 5).forEach((it) => {
           const tr = document.createElement("tr");
           const thumb = it.thumbnail ? `<img src="${it.thumbnail}" class="w-12 h-12 object-contain" />` : "";
           tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1"><a href="${it.url}" target="_blank" class="text-blue-600 underline">${it.site}</a></td><td class="px-2 py-1">${it.price_eur ?? ""}</td><td class="px-2 py-1">${thumb}</td>`;
           resultsBody.appendChild(tr);
           excelRows.push({ Item: ann.name, Site: it.site, Price: it.price_eur, Link: it.url });
+          log('Row added', it.url, it.price_eur);
         });
       }
       resultsTable.classList.remove("hidden");
