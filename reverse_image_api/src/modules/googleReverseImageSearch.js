@@ -1,58 +1,60 @@
-const axios = require("axios");
-const cheerio = require("cheerio");
-const {
-  SuccessResponseObject,
-  ErrorResponseObject,
-} = require("../common/http");
+import sharp from 'sharp';
+import axios from 'axios';
+import { load } from 'cheerio';
 
-async function reverse(imageUrl) {
-  try {
-    const headers = {
-      "User-Agent":
-        "Mozilla/5.0 (Linux; Android 6.0.1; SM-G920V Build/MMB29K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.98 Mobile Safari/537.36",
-    };
-    const url = `https://images.google.com/searchbyimage?safe=off&sbisrc=tg&image_url=${imageUrl}`;
-    const response = await axios.get(url, { headers, maxRedirects: 20 });
-
-    const $ = cheerio.load(response.data);
-    const result = { similarUrl: "", resultText: "" };
-
-    const similarInput = $(".gLFyf").first();
-    if (similarInput.length) {
-      const similarImage = similarInput.attr("value");
-      const similarUrl = `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(
-        similarImage
-      )}`;
-      result.similarUrl = similarUrl;
-    } else {
-      return new ErrorResponseObject("Failed to find similar images");
-    }
-
-    const outputDiv = $("div.r5a77d").first();
-    if (outputDiv.length) {
-      const output = outputDiv.text();
-      let decodedText = unescape(encodeURIComponent(output));
-
-      if (decodedText.includes("Â")) {
-        decodedText = decodedText.replace(/Â/g, " ");
-      }
-      result.resultText = decodedText;
-    } else {
-      return new ErrorResponseObject("Failed to find text output");
-    }
-
-    return new SuccessResponseObject("Successfully Got the Result", result);
-  } catch (error) {
-    return new ErrorResponseObject(`Failed to reverse image: ${error.message}`);
-  }
-}
-
-module.exports = {
-  reverse,
-};
-
-// For Testing
-/* reverse("https://graph.org/file/1668e5e51e612341b945e.jpg")
-  .then((result) => console.log(result["success"]))
-  .catch((error) => console.error(error.message));
+/**
+ * Given a Base64‐encoded image and Vision annotations,
+ * crops each detected object and reverse‐searches it,
+ * scraping the top 5 matches for site, URL, price_eur, and thumbnail.
+ *
+ * @param {string} base64      Base64 image string
+ * @param {Array}  annotations [{ name, boundingPoly: { normalizedVertices: [...] } }, …]
+ * @returns {Promise<Array<{ site, url, price_eur, thumbnail }>>}
  */
+export default async function googleReverseImageSearch(base64, annotations) {
+  // Decode Base64 to buffer
+  const imgBuffer = Buffer.from(base64, 'base64');
+  const { width: imgW, height: imgH } = await sharp(imgBuffer).metadata();
+
+  const allResults = [];
+
+  for (const ann of annotations) {
+    const verts = ann.boundingPoly.normalizedVertices;
+    const left = Math.round(verts[0].x * imgW);
+    const top = Math.round(verts[0].y * imgH);
+    const width = Math.round((verts[2].x - verts[0].x) * imgW);
+    const height = Math.round((verts[2].y - verts[0].y) * imgH);
+
+    // Crop the object
+    const cropBuffer = await sharp(imgBuffer)
+      .extract({ left, top, width, height })
+      .toBuffer();
+
+    // Reverse‐image search via your scraper endpoint
+    const response = await axios.post(
+      'https://your-reverse-endpoint.example.com/search',
+      cropBuffer,
+      { headers: { 'Content-Type': 'application/octet-stream' } }
+    );
+
+    // Parse HTML with Cheerio
+    const $ = load(response.data);
+    $('.product-item')
+      .slice(0, 5)
+      .each((_, el) => {
+        const site = $(el).find('.seller-name').text().trim();
+        const url = $(el).find('a.product-link').attr('href');
+        const priceText = $(el).find('.price').text().trim();
+        const price_eur = parseFloat(
+          priceText
+            .replace(/[^\d.,]/g, '')
+            .replace(/\./g, '')
+            .replace(',', '.')
+        );
+        const thumbnail = $(el).find('img.product-thumb').attr('src');
+        allResults.push({ site, url, price_eur, thumbnail });
+      });
+  }
+
+  return allResults;
+}
