@@ -1,11 +1,11 @@
-FROM node:18
+# reverse_image_api/Dockerfile
+FROM node:20-slim
 
 WORKDIR /app
 
-# 1) Upgrade npm so no “new major version” notices show
-RUN npm install -g npm@11.4.1
+# (optional) silence npm notice
+ENV npm_config_loglevel=error
 
-# 2) Copy package files and install deps
 COPY package*.json ./
 RUN npm install
 
