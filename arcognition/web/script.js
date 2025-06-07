@@ -107,7 +107,6 @@ document.addEventListener("DOMContentLoaded", () => {
       await new Promise(res => (preview.onload = res));
       canvas.width = preview.naturalWidth;
       canvas.height = preview.naturalHeight;
-      preview.classList.remove("hidden");
       canvas.classList.remove("hidden");
 
       // 2. detect objects

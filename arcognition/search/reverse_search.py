@@ -11,9 +11,7 @@ import requests
 class ReverseSearch:
     """Interface to the deployed reverse image search API."""
 
-    REVERSE_SEARCH_ENDPOINT = (
-        "https://arcognition-search-<your-project>.run.app/reverse"
-    )
+    REVERSE_SEARCH_ENDPOINT = "http://localhost:5000/reverse"
 
     def __init__(self, endpoint: str | None = None) -> None:
         self.endpoint = endpoint or self.REVERSE_SEARCH_ENDPOINT
@@ -27,16 +25,7 @@ class ReverseSearch:
             response.raise_for_status()
             data = response.json()
             items = data.get("results") or []
-            if not items:
-                raise RuntimeError("empty results")
             return items
         except Exception as exc:  # pylint: disable=broad-except
             print(f"reverse search failed: {exc}")
-            return [
-                {
-                    "site": "example.com",
-                    "url": "https://example.com/product1",
-                    "price_eur": 0.0,
-                    "thumbnail": "",
-                }
-            ]
+            return []
