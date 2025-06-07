@@ -129,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let items = [];
         try {
           const res = await reverseSearch(crop);
-          items = res.data?.results || [];
+          items = res.data?.results || res.results || [];
         } catch (err) {
           console.warn('reverseSearch failed', err);
         }
