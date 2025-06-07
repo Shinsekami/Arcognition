@@ -68,14 +68,30 @@ document.addEventListener('DOMContentLoaded', () => {
     return res.annotations;
   }
 
-  async function reverseSearch(blob) {
-    const fd = new FormData();
-    fd.append('image', blob, 'crop.jpg');
-    const res = await fetchJson(REVERSE_SEARCH_API, {
-      method: 'POST',
-      body: fd,
+  async function reverseSearch(fullBase64Image, annotation) {
+    console.log('🔍 reverseSearch payload:', {
+      base64: fullBase64Image,
+      annotations: [annotation],
     });
-    return res;
+    const res = await fetch(REVERSE_SEARCH_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base64: fullBase64Image,
+        annotations: [annotation],
+      }),
+    });
+    console.log('🔍 reverseSearch status:', res.status, res.statusText);
+    const text = await res.text();
+    console.log('🔍 reverseSearch raw response:', text);
+    try {
+      const json = JSON.parse(text);
+      console.log('🔍 reverseSearch parsed JSON:', json);
+      return json;
+    } catch (err) {
+      console.error('🔍 reverseSearch JSON parse error:', err);
+      throw err;
+    }
   }
 
   /* ---------- main click handler ---------- */
@@ -85,8 +101,9 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsBody.innerHTML = '';
     downloadLink.classList.add('hidden');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
     try {
-      // 1. get image as base64 and preview
+      // 1. Get base64 + preview
       let base64, blob;
       if (fileInput && fileInput.files.length) {
         blob = fileInput.files[0];
@@ -105,78 +122,75 @@ document.addEventListener('DOMContentLoaded', () => {
         preview.src = `data:image/jpeg;base64,${base64}`;
       } else {
         alert('Provide an image file or URL');
+        processBtn.disabled = false;
         return;
       }
 
-      await new Promise(res => (preview.onload = res));
+      await new Promise(r => (preview.onload = r));
       canvas.width = preview.naturalWidth;
       canvas.height = preview.naturalHeight;
       canvas.classList.remove('hidden');
+      ctx.drawImage(preview, 0, 0);
 
-      // 2. detect objects
+      // 2. Detect objects
       const annotations = await detect(base64);
-      if (!annotations.length) {
-        alert('No objects found');
-        return;
-      }
-
-      drawBoxes(annotations);
-
       const excelRows = [];
+
+      // 3. For each detected item, send full base64 + annotation to your server
       for (const ann of annotations) {
-        if (!ann.bbox) continue;
-        const crop = await cropBlobFromBox(preview, ann.bbox);
+        // optional local thumbnail
+        const cropBlob = await cropBlobFromBox(preview, ann.bbox);
+        const thumbnailURL = URL.createObjectURL(cropBlob);
+
+        // server‐side reverse search
         let items = [];
         try {
-          const res = await reverseSearch(crop);
-          items = res.data?.results || res.results || [];
+          const res = await reverseSearch(base64, ann);
+          items = res.data?.results || [];
         } catch (err) {
           console.warn('reverseSearch failed', err);
         }
+
         if (!items.length) {
           const tr = document.createElement('tr');
-          tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1" colspan="2">No matches found</td>`;
+          tr.innerHTML = `<td>${ann.name}</td><td colspan="2">No matches found</td>`;
           resultsBody.appendChild(tr);
           excelRows.push({ Item: ann.name, Site: '', Price: '', Link: '' });
           continue;
         }
+
+        // render up to 5 results per item
         items.slice(0, 5).forEach(it => {
           const tr = document.createElement('tr');
-          const thumb = it.thumbnail
-            ? `<img src="${it.thumbnail}" class="w-12 h-12 object-contain" />`
-            : '';
-          tr.innerHTML = `<td class="px-2 py-1">${
-            ann.name
-          }</td><td class="px-2 py-1"><a href="${
-            it.url
-          }" target="_blank" class="text-blue-600 underline">${
-            it.site
-          }</a></td><td class="px-2 py-1">${
-            it.price_eur ?? ''
-          }</td><td class="px-2 py-1">${thumb}</td>`;
+          tr.innerHTML = `
+            <td>${ann.name}</td>
+            <td><a href="${it.url}" target="_blank">${it.site}</a></td>
+            <td>€${it.price_eur ?? ''}</td>
+            <td><img src="${
+              it.thumbnail
+            }" class="w-12 h-12 object-contain" /></td>
+          `;
           resultsBody.appendChild(tr);
           excelRows.push({
             Item: ann.name,
             Site: it.site,
-            Price: it.price_eur,
+            Price: it.price_eur ?? '',
             Link: it.url,
           });
         });
       }
-      resultsTable.classList.remove('hidden');
 
-      if (excelRows.length) {
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.json_to_sheet(excelRows);
-        XLSX.utils.book_append_sheet(wb, ws, 'Results');
-        const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-        const excelBlob = new Blob([wbout], {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        });
-        downloadLink.href = URL.createObjectURL(excelBlob);
-        downloadLink.download = 'arcognition_report.xlsx';
-        downloadLink.classList.remove('hidden');
-      }
+      // 4. Build & download Excel
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(excelRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Report');
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const excelBlob = new Blob([wbout], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      downloadLink.href = URL.createObjectURL(excelBlob);
+      downloadLink.download = 'arcognition_report.xlsx';
+      downloadLink.classList.remove('hidden');
     } catch (err) {
       console.error(err);
       alert(err.message);
