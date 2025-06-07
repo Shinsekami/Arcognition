@@ -123,8 +123,20 @@ document.addEventListener("DOMContentLoaded", () => {
       for (const ann of annotations) {
         if (!ann.bbox) continue;
         const crop = await cropBlobFromBox(preview, ann.bbox);
-        const res = await reverseSearch(crop);
-        const items = res.results || [];
+        let items = [];
+        try {
+          const res = await reverseSearch(crop);
+          items = res.results || [];
+        } catch (err) {
+          console.warn('reverseSearch failed', err);
+        }
+        if (!items.length) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1" colspan="2">No matches found</td>`;
+          resultsBody.appendChild(tr);
+          excelRows.push({ Item: ann.name, Site: '', Price: '', Link: '' });
+          continue;
+        }
         items.slice(0, 5).forEach(it => {
           const tr = document.createElement("tr");
           tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1"><a href="${it.url}" target="_blank" class="text-blue-600 underline">${it.site}</a></td><td class="px-2 py-1">${it.price_eur ?? ""}</td>`;

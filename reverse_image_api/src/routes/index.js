@@ -63,7 +63,7 @@ r.post("/reverse", upload.single("image"), async (req, res) => {
         filename: req.file.originalname || "image.jpg",
       });
       const upRes = await axios.post("https://0x0.st", form, {
-        headers: form.getHeaders(),
+        headers: { ...form.getHeaders(), 'User-Agent': 'curl/8.0' },
       });
       imageUrl = upRes.data.trim();
     }
