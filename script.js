@@ -128,7 +128,10 @@ async function callDetect(base64) {
     if (!data.ok) throw new Error(`Vision API error: ${data.stage} – ${data.detail}`);
     return data.annotations;
 }
+<<<<<<< HEAD
 
+=======
+>>>>>>> 1799a9d4d62929c23e455ef32be86e5d1ba9c645
 function drawBoxes(annotations) {
     const ctx = canvas.getContext('2d');
     canvas.width = previewImg.naturalWidth;
@@ -192,6 +195,10 @@ processBtn.addEventListener('click', async () => {
         const blob = await getImageBlob();
         const base64 = await blobToBase64(blob);
         const annotations = await callDetect(base64);
+<<<<<<< HEAD
+=======
+
+>>>>>>> 1799a9d4d62929c23e455ef32be86e5d1ba9c645
         drawBoxes(annotations);
         fillTable(annotations);
         reverseLinks = await reverseSearch(blob);
@@ -200,6 +207,10 @@ processBtn.addEventListener('click', async () => {
     } catch (err) {
         console.error(err);
         alert(err.message);
+<<<<<<< HEAD
+=======
+
+>>>>>>> 1799a9d4d62929c23e455ef32be86e5d1ba9c645
     } finally {
         processBtn.disabled = false;
         processBtn.textContent = 'Process';
