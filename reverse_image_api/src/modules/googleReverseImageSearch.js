@@ -1,49 +1,56 @@
-// reverse_image_api/src/modules/googleReverseImageSearch.js
-
 import axios from 'axios';
+import FormData from 'form-data';
+import { load } from 'cheerio';
 
-/**
- * For each annotation:
- *  1) Upload the full-image + annotation to your Supabase function,
- *  2) Grab back a public URL for the cropped image,
- *  3) Call the google-reverse-image-api with that URL,
- *  4) Return the JSON results.
- */
-export default async function reverseSearchViaSupabase(base64, annotations) {
-  const SUPABASE_UPLOAD =
-    'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/upload_crop';
-  const GOOGLE_REVERSE_API =
-    'https://google-reverse-image-api.vercel.app/reverse';
+const GOOGLE_SEARCH_BY_IMAGE = 'https://www.google.com/searchbyimage/upload';
 
-  const all = [];
+export default async function reverseSearch(buffer) {
+  // 1) build the multipart/form-data payload
+  const form = new FormData();
+  form.append('encoded_image', buffer, { filename: 'image.jpg' });
+  form.append('image_content', '');
+  form.append('filename', '');
 
-  for (const ann of annotations) {
-    // 1) upload & crop on Supabase
-    const upload = await axios.post(
-      SUPABASE_UPLOAD,
-      { base64, annotation: ann },
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-    const { publicUrl } = upload.data;
-    if (!publicUrl) throw new Error('upload_crop returned no publicUrl');
+  // 2) POST to Google’s upload endpoint, telling axios not to follow redirects
+  const uploadRes = await axios.post(GOOGLE_SEARCH_BY_IMAGE, form, {
+    headers: {
+      ...form.getHeaders(),
+      // pretend to be a real browser
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    },
+    maxRedirects: 0,
+    validateStatus: status => status === 302,
+  });
 
-    // 2) reverse-image search that URL
-    const resp = await axios.post(
-      GOOGLE_REVERSE_API,
-      { imageUrl: publicUrl },
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-    if (!resp.data.success) {
-      throw new Error('Reverse API failed: ' + resp.data.message);
-    }
-
-    // 3) collect the data you need
-    all.push({
-      name: ann.name,
-      similarUrl: resp.data.data.similarUrl,
-      resultText: resp.data.data.resultText,
-    });
+  // 3) Google responds with a 302 redirect to the actual search results page
+  const redirectUrl = uploadRes.headers.location;
+  if (!redirectUrl) {
+    throw new Error('No redirect from Google Image upload');
   }
 
-  return all;
+  // 4) Fetch the results page
+  const resultsPage = await axios.get(redirectUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    },
+  });
+  const $ = load(resultsPage.data);
+
+  // 5) Scrape the “best guess” & the result links
+  const bestGuess = $('#topstuff .card-section a').first().text() || null;
+  const links = [];
+  $('#search a')
+    .filter((_, a) => {
+      const href = $(a).attr('href') || '';
+      // only top‐level result links
+      return href.startsWith('/url?');
+    })
+    .each((_, a) => {
+      const href = $(a).attr('href');
+      // Google wraps them in /url?q=ACTUAL_URL&sa=…
+      const m = href.match(/\/url\?q=([^&]+)/);
+      if (m) links.push(decodeURIComponent(m[1]));
+    });
+
+  return { bestGuess, links };
 }

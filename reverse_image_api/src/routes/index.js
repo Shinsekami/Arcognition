@@ -1,32 +1,53 @@
 import express from 'express';
-import downloadImageHandler from './download_image.js';
-import detectHandler from './detect.js';
+import axios from 'axios';
+import sharp from 'sharp';
+import vision from '@google-cloud/vision';
 import reverseSearch from '../modules/googleReverseImageSearch.js';
-import { ErrorResponseObject } from '../common/http.js';
 
 const router = express.Router();
+const client = new vision.ImageAnnotatorClient();
 
-// parse JSON body
-router.use(express.json({ limit: '10mb' }));
-
-router.post('/download_image', downloadImageHandler);
-router.post('/detect', detectHandler);
-
-router.post('/reverse', async (req, res) => {
+// POST /reverse
+router.post('/', async (req, res) => {
   try {
-    const { base64, annotations } = req.body;
-    if (!base64 || !Array.isArray(annotations)) {
-      return res
-        .status(400)
-        .json(new ErrorResponseObject('Missing base64 or annotations array'));
+    // 1) decode full-image
+    const imgBuffer = Buffer.from(req.body.base64, 'base64');
+
+    // 2) call Cloud Vision
+    const [detection] = await client.objectLocalization({
+      image: { content: imgBuffer },
+    });
+    const annotations = detection.localizedObjectAnnotations;
+
+    const results = [];
+
+    for (const ann of annotations) {
+      // compute absolute crop box
+      const { width: W, height: H } = await sharp(imgBuffer).metadata();
+      const vs = ann.boundingPoly.normalizedVertices;
+      const left = Math.round(vs[0].x * W);
+      const top = Math.round(vs[0].y * H);
+      const w = Math.round((vs[2].x - vs[0].x) * W);
+      const h = Math.round((vs[2].y - vs[0].y) * H);
+
+      // 3) actually crop
+      const cropBuffer = await sharp(imgBuffer)
+        .extract({ left, top, width: w, height: h })
+        .toBuffer();
+
+      // 4) reverse-image search the crop
+      const rev = await reverseSearch(cropBuffer);
+      results.push({ object: ann.name, reverse: rev });
     }
-    const results = await reverseSearch(base64, annotations);
-    return res.json({ success: true, data: { results } });
+
+    res.json({ success: true, data: results });
   } catch (err) {
     console.error('/reverse error:', err);
-    return res
-      .status(500)
-      .json(new ErrorResponseObject('Reverse search failed'));
+    res.status(500).json({
+      success: false,
+      message: 'Reverse search failed',
+      error: err.toString(),
+    });
   }
 });
 

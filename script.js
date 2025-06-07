@@ -3,7 +3,7 @@ console.log('👉 script.js loaded');
 document.addEventListener('DOMContentLoaded', () => {
   const log = (...args) => console.log('[Arcognition]', ...args);
 
-  // Robust selectors: no reliance on IDs that may not exist
+  // UI elements
   const fileInput = document.querySelector('input[type="file"]');
   const urlInput = document.querySelector(
     'input[type="text"], input[name="url"]'
@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   );
   const preview = document.querySelector('img#preview, img.preview');
   const canvas = document.querySelector('canvas#canvas, canvas');
-  const ctx = canvas && canvas.getContext('2d');
+  const ctx = canvas.getContext('2d');
   const resultsBody = document.querySelector('tbody#resultsBody, tbody');
   const downloadLink = document.querySelector('a#downloadLink, a.download');
 
@@ -39,120 +39,119 @@ document.addEventListener('DOMContentLoaded', () => {
   const REVERSE_SEARCH_API =
     'https://arcognition-search-490571042366.us-central1.run.app/reverse';
 
-  // helper to fetch JSON
-  const fetchJson = (url, opts) =>
-    fetch(url, opts).then(async r => {
-      const text = await r.text();
-      try {
-        return JSON.parse(text);
-      } catch {
-        throw new Error(`Invalid JSON from ${url}: ${text}`);
-      }
-    });
+  // fetch JSON helper
+  const fetchJson = async (url, opts) => {
+    const res = await fetch(url, opts);
+    const txt = await res.text();
+    try {
+      return JSON.parse(txt);
+    } catch {
+      throw new Error(`Invalid JSON from ${url}: ${txt}`);
+    }
+  };
 
+  // download URL → base64 via Supabase
   async function downloadToBase64(url) {
     log('Downloading image:', url);
-    const res = await fetchJson(DOWNLOAD_IMAGE_API, {
+    const { base64 } = await fetchJson(DOWNLOAD_IMAGE_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
-    if (!res.base64) throw new Error('download_image failed');
-    log('Downloaded base64 length:', res.base64.length);
-    return res.base64;
+    if (!base64) throw new Error('download_image failed');
+    return base64;
   }
 
+  // call Vision detect
   async function detect(base64) {
     log('Calling detect API');
-    const res = await fetchJson(DETECT_API, {
+    const { annotations } = await fetchJson(DETECT_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ base64 }),
     });
-    if (!Array.isArray(res.annotations)) throw new Error('detect API failed');
-    log('Annotations:', res.annotations.length);
-    return res.annotations;
+    if (!Array.isArray(annotations)) throw new Error('detect API failed');
+    return annotations;
   }
 
+  // call your reverse‐image‐search service
   async function reverseSearch(base64, annotation) {
     log('Reverse search for:', annotation.name);
-    const resp = await fetch(REVERSE_SEARCH_API, {
+    const res = await fetch(REVERSE_SEARCH_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ base64, annotations: [annotation] }),
     });
-    log('Status:', resp.status);
-    const json = await resp.json();
-    log('Payload:', json);
-    return Array.isArray(json.data?.results) ? json.data.results : [];
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`reverse failed (${res.status}): ${body}`);
+    }
+    const { data } = await res.json();
+    return Array.isArray(data?.results) ? data.results : [];
   }
 
-  async function getBase64FromFile(file) {
-    return await new Promise((res, rej) => {
+  // file → base64
+  function getBase64FromFile(file) {
+    return new Promise((resolve, reject) => {
       const fr = new FileReader();
-      fr.onload = () => res(fr.result.split(',')[1]);
-      fr.onerror = rej;
+      fr.onload = () => resolve(fr.result.split(',')[1]);
+      fr.onerror = reject;
       fr.readAsDataURL(file);
     });
   }
 
   processBtn.addEventListener('click', async e => {
     e.preventDefault();
-    log('Process clicked');
     processBtn.disabled = true;
     resultsBody.innerHTML = '';
     downloadLink.classList.add('hidden');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     try {
-      // 1. Load image
+      // 1) load image → base64 + preview
       let base64;
-      if (fileInput.files && fileInput.files.length > 0) {
+      if (fileInput.files.length) {
         base64 = await getBase64FromFile(fileInput.files[0]);
         preview.src = URL.createObjectURL(fileInput.files[0]);
-      } else if (urlInput.value && urlInput.value.trim()) {
+      } else if (urlInput.value.trim()) {
         base64 = await downloadToBase64(urlInput.value.trim());
         preview.src = `data:image/jpeg;base64,${base64}`;
       } else {
         alert('Please select a file or enter an image URL.');
-        processBtn.disabled = false;
         return;
       }
 
       await new Promise(r => (preview.onload = r));
-      const imgW = preview.naturalWidth,
-        imgH = preview.naturalHeight;
-      canvas.width = imgW;
-      canvas.height = imgH;
+      const W = preview.naturalWidth,
+        H = preview.naturalHeight;
+      canvas.width = W;
+      canvas.height = H;
       ctx.drawImage(preview, 0, 0);
 
-      // 2. Detect
+      // 2) detect
       const annotations = await detect(base64);
       if (!annotations.length) {
-        alert('No objects detected in the image.');
-        processBtn.disabled = false;
+        alert('No objects detected.');
         return;
       }
 
-      // 3. Reverse‐image search & render
+      // 3) reverse‐search each, draw boxes + render results
       const excelRows = [];
       for (const ann of annotations) {
-        // draw bounding box
-        const verts = ann.boundingPoly.normalizedVertices;
-        const x = verts[0].x * imgW,
-          y = verts[0].y * imgH;
-        const w = (verts[2].x - verts[0].x) * imgW,
-          h = (verts[2].y - verts[0].y) * imgH;
+        const v = ann.boundingPoly.normalizedVertices;
+        const x = v[0].x * W,
+          y = v[0].y * H;
+        const w = (v[2].x - v[0].x) * W,
+          h = (v[2].y - v[0].y) * H;
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, w, h);
 
-        // search
         const items = await reverseSearch(base64, ann);
         if (!items.length) {
           resultsBody.insertAdjacentHTML(
             'beforeend',
-            `<tr><td>${ann.name}</td><td colspan="2">No matches found</td></tr>`
+            `<tr><td>${ann.name}</td><td colspan="2">No matches</td></tr>`
           );
           excelRows.push({ Item: ann.name, Site: '', Price: '', Link: '' });
         } else {
@@ -175,9 +174,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      // 4. Excel export
+      // 4) generate Excel via SheetJS
       if (excelRows.length) {
-        log('Generating Excel rows:', excelRows.length);
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(excelRows);
         XLSX.utils.book_append_sheet(wb, ws, 'Report');
