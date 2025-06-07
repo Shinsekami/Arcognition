@@ -22,6 +22,7 @@ async function scrapeInfo(url) {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
       },
+      maxRedirects: 10,
     });
     const $ = cheerio.load(page.data);
     const title =
@@ -64,6 +65,7 @@ r.post("/reverse", upload.single("image"), async (req, res) => {
       });
       const upRes = await axios.post("https://0x0.st", form, {
         headers: { ...form.getHeaders(), 'User-Agent': 'curl/8.0' },
+        maxRedirects: 5,
       });
       imageUrl = upRes.data.trim();
     }
@@ -81,6 +83,7 @@ r.post("/reverse", upload.single("image"), async (req, res) => {
             "User-Agent":
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
           },
+          maxRedirects: 20,
         });
         const $ = cheerio.load(page.data);
         $("a").each((i, el) => {

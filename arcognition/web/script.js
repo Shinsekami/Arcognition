@@ -137,9 +137,10 @@ document.addEventListener("DOMContentLoaded", () => {
           excelRows.push({ Item: ann.name, Site: '', Price: '', Link: '' });
           continue;
         }
-        items.slice(0, 5).forEach(it => {
+        items.slice(0, 5).forEach((it) => {
           const tr = document.createElement("tr");
-          tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1"><a href="${it.url}" target="_blank" class="text-blue-600 underline">${it.site}</a></td><td class="px-2 py-1">${it.price_eur ?? ""}</td>`;
+          const thumb = it.thumbnail ? `<img src="${it.thumbnail}" class="w-12 h-12 object-contain" />` : "";
+          tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1"><a href="${it.url}" target="_blank" class="text-blue-600 underline">${it.site}</a></td><td class="px-2 py-1">${it.price_eur ?? ""}</td><td class="px-2 py-1">${thumb}</td>`;
           resultsBody.appendChild(tr);
           excelRows.push({ Item: ann.name, Site: it.site, Price: it.price_eur, Link: it.url });
         });

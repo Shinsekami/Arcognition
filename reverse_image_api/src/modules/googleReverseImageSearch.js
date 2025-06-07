@@ -12,7 +12,7 @@ async function reverse(imageUrl) {
         "Mozilla/5.0 (Linux; Android 6.0.1; SM-G920V Build/MMB29K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.98 Mobile Safari/537.36",
     };
     const url = `https://images.google.com/searchbyimage?safe=off&sbisrc=tg&image_url=${imageUrl}`;
-    const response = await axios.get(url, { headers });
+    const response = await axios.get(url, { headers, maxRedirects: 20 });
 
     const $ = cheerio.load(response.data);
     const result = { similarUrl: "", resultText: "" };
