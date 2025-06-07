@@ -1,5 +1,3 @@
-// src/modules/googleReverseImageSearch.js
-
 const vision = require('@google-cloud/vision');
 const axios = require('axios');
 const cheerio = require('cheerio');
@@ -7,7 +5,7 @@ const cheerio = require('cheerio');
 const visionClient = new vision.ImageAnnotatorClient();
 let eurRates = null;
 
-// Fetch & cache EUR exchange rates
+// 1. Fetch & cache EUR exchange rates
 async function getRates() {
   if (eurRates) return eurRates;
   const resp = await axios.get('https://api.exchangerate.host/latest?base=EUR');
@@ -16,17 +14,36 @@ async function getRates() {
   return eurRates;
 }
 
-// Universal price extractor: symbols ₹ € $ £ before or after, or bare numbers
+// 2. Universal price extractor: symbols ₹ € $ £ OR 3-letter codes before/after
 function extractPrice(text) {
-  const re = /([₹€$£])\s*([\d.,\s]+)|([\d.,\s]+)\s*([₹€$£])|^([\d.,\s]+)$/;
+  const re =
+    /([₹€$£])\s*([\d.,\s]+)|([\d.,\s]+)\s*([₹€$£])|([\d.,\s]+)([A-Z]{3})|([A-Z]{3})([\d.,\s]+)/;
   const m = text.match(re);
   if (!m) return null;
-  // m[1]=symbol before, m[2]=amount after symbol, m[3]=amount before symbol, m[4]=symbol after, m[5]=bare number
-  let symbol = m[1] || m[4] || null;
-  let raw = m[2] || m[3] || m[5] || '';
-  const clean = raw.replace(/[,\s]/g, '');
-  const amount = parseFloat(clean);
-  if (!amount) return null;
+
+  let symbol, raw;
+  if (m[1] && m[2]) {
+    // symbol before amount
+    symbol = m[1];
+    raw = m[2];
+  } else if (m[4] && m[3]) {
+    // symbol after
+    symbol = m[4];
+    raw = m[3];
+  } else if (m[6] && m[5]) {
+    // code after
+    symbol = m[6];
+    raw = m[5];
+  } else if (m[7] && m[8]) {
+    // code before
+    symbol = m[7];
+    raw = m[8];
+  } else {
+    return null;
+  }
+
+  const amount = parseFloat(raw.replace(/[,\s]/g, ''));
+  if (isNaN(amount)) return null;
   return { symbol, amount };
 }
 
@@ -48,6 +65,7 @@ async function googleReverseSearch(cropBuf, label) {
   for (const pi of pages.slice(0, 5)) {
     const pageUrl = pi.url || pi;
     console.log(`[scrape] fetching ${pageUrl}`);
+
     let html;
     try {
       html = (await axios.get(pageUrl, { timeout: 8000 })).data;
@@ -60,7 +78,29 @@ async function googleReverseSearch(cropBuf, label) {
     const hostname = new URL(pageUrl).hostname.replace(/^www\./, '');
     console.log(`[scrape] site: ${hostname}`);
 
-    // ——— UNIVERSAL THUMBNAIL PICKER ——————————————————————
+    // 2) Detect presence of enough structured data to treat it as a product page
+    const hasJsonLdProduct = $('script[type="application/ld+json"]')
+      .toArray()
+      .some(el => {
+        try {
+          const o = JSON.parse($(el).html());
+          return o['@type'] === 'Product';
+        } catch {
+          return false;
+        }
+      });
+    const hasOgPrice = !!$('meta[property="product:price:amount"]').attr(
+      'content'
+    );
+    const isAmazon = hostname.includes('amazon.');
+    const isEbay = hostname.includes('ebay.');
+
+    if (!hasJsonLdProduct && !hasOgPrice && !isAmazon && !isEbay) {
+      console.log(`[scrape] skipping ${hostname}, not a product page`);
+      continue;
+    }
+
+    // 3) Pick thumbnail (same universal logic)
     const ldImages = $('script[type="application/ld+json"]')
       .map((i, el) => {
         try {
@@ -78,9 +118,7 @@ async function googleReverseSearch(cropBuf, label) {
       vd.webDetection.fullMatchingImages?.[0]?.url ||
       ldImages ||
       $('meta[property="og:image"]').attr('content') ||
-      $('meta[name="twitter:image"]').attr('content') ||
       $('[itemprop="image"]').attr('content') ||
-      $('[itemprop="image"]').attr('src') ||
       $('img')
         .filter((i, el) =>
           /product|catalog|item|thumb/i.test($(el).attr('src') || '')
@@ -91,11 +129,11 @@ async function googleReverseSearch(cropBuf, label) {
 
     console.log(`[scrape] thumbnail → ${thumb}`);
 
-    // ——— UNIVERSAL PRICE PICKER ——————————————————————
+    // 4) Price detection
     let priceText = null;
 
-    // 1) Amazon-specific (IN, UK, US, etc.)
-    if (hostname.includes('amazon.')) {
+    // a) Amazon
+    if (isAmazon) {
       priceText =
         $('#priceblock_ourprice').text().trim() ||
         $('#priceblock_dealprice').text().trim() ||
@@ -106,17 +144,24 @@ async function googleReverseSearch(cropBuf, label) {
         })() ||
         $('span.a-offscreen').first().text().trim() ||
         null;
-
       // Reattach symbol if missing
-      if (priceText && !/^[₹€$£]/.test(priceText)) {
+      if (priceText && !/^[₹€£$A-Z]{1,3}/.test(priceText)) {
         if (hostname.endsWith('.in')) priceText = `₹${priceText}`;
         else if (hostname.endsWith('.co.uk')) priceText = `£${priceText}`;
-        else if (hostname.includes('.com')) priceText = `$${priceText}`;
+        else priceText = `$${priceText}`;
       }
     }
 
-    // 2) JSON-LD schema.org/Product
-    if (!priceText) {
+    // b) eBay
+    if (!priceText && isEbay) {
+      priceText =
+        $('.display-price').text().trim() ||
+        $('.notranslate').first().text().trim() ||
+        null;
+    }
+
+    // c) JSON-LD fallback
+    if (!priceText && hasJsonLdProduct) {
       $('script[type="application/ld+json"]').each((i, el) => {
         if (priceText) return;
         try {
@@ -128,30 +173,14 @@ async function googleReverseSearch(cropBuf, label) {
       });
     }
 
-    // 3) OpenGraph / Twitter
-    if (!priceText) {
-      const ogAmt = $('meta[property="product:price:amount"]').attr('content');
-      const ogCur = $('meta[property="product:price:currency"]').attr(
-        'content'
-      );
-      if (ogAmt && ogCur) priceText = `${ogAmt}${ogCur}`;
-      if (!priceText) {
-        priceText =
-          $(
-            'meta[name="twitter:data1"][value*="₹"],meta[name="twitter:data1"][value*="£"],meta[name="twitter:data1"][value*="$"]'
-          ).attr('value') || null;
-      }
+    // d) OpenGraph/Twitter
+    if (!priceText && hasOgPrice) {
+      const amt = $('meta[property="product:price:amount"]').attr('content');
+      const cur = $('meta[property="product:price:currency"]').attr('content');
+      priceText = amt && cur ? `${amt}${cur}` : null;
     }
 
-    // 4) Microdata itemprop
-    if (!priceText) {
-      priceText =
-        $('[itemprop="price"]').attr('content') ||
-        $('[itemprop="price"]').text().trim() ||
-        null;
-    }
-
-    // 5) Class-name heuristic
+    // e) Class-name heuristic
     if (!priceText) {
       const el = $('[class*="price"]')
         .filter((i, el) => /\d/.test($(el).text()))
@@ -159,11 +188,11 @@ async function googleReverseSearch(cropBuf, label) {
       priceText = el.text().trim() || null;
     }
 
-    // 6) Fallback regex on body text
+    // f) Fallback regex on body text
     if (!priceText) {
       const m = $('body')
         .text()
-        .match(/([₹€£$]?\s?[\d.,\s]+)/);
+        .match(/([₹€£$]?\s?[\d.,\s]+(?:[A-Z]{3})?)/);
       priceText = m ? m[0].trim() : null;
     }
 
@@ -173,10 +202,10 @@ async function googleReverseSearch(cropBuf, label) {
       continue;
     }
 
-    // ——— PARSE & CONVERT —————————————————————————————————
+    // 5) Parse & convert
     const pr = extractPrice(priceText);
     if (!pr) {
-      console.warn(`[scrape] failed to parse price "${priceText}"`);
+      console.warn(`[scrape] failed to parse "${priceText}"`);
       continue;
     }
 
@@ -190,6 +219,8 @@ async function googleReverseSearch(cropBuf, label) {
           ? 'GBP'
           : symbol === '₹'
           ? 'INR'
+          : /^[A-Z]{3}$/.test(symbol)
+          ? symbol
           : null;
       if (cur && rates[cur]) price_eur = amount / rates[cur];
     }
