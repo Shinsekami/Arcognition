@@ -1,82 +1,83 @@
-/* Arcognition front-end logic  —  clean, conflict-free */
+document.addEventListener("DOMContentLoaded", () => {
+  // Grab elements safely
+  const fileInput  = document.querySelector('input[type="file"]');
+  const urlInput   = document.querySelector('#urlInput') || document.querySelector('input[name="url"]');
+  const processBtn = document.querySelector('#processBtn') || document.querySelector('button[type="submit"]');
 
-const SUPABASE_BASE      = "https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1";
-const DOWNLOAD_IMAGE_API = `${SUPABASE_BASE}/download_image`;
-const DETECT_API         = `${SUPABASE_BASE}/detect`;
-const REVERSE_SEARCH_API =
-  "https://arcognition-search-490571042366.us-central1.run.app/reverse";  // Cloud-Run
-
-// ---------- helpers ----------
-async function callDetect(base64) {
-  const r = await fetch(DETECT_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ base64 })
-  });
-  const data = await r.json();
-  if (!data.ok) throw new Error(`Vision API error: ${data.stage} – ${data.detail}`);
-  return data.annotations;
-}
-
-async function reverseSearch(cropBlob) {
-  const form = new FormData();
-  form.append("image", cropBlob, "crop.jpg");
-  const r = await fetch(REVERSE_SEARCH_API, { method: "POST", body: form });
-  if (!r.ok) throw new Error("Reverse search failed");
-  return r.json(); // array of URLs
-}
-
-async function getImageBlobFromUrl(url) {
-  const r = await fetch(DOWNLOAD_IMAGE_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url })
-  });
-  const data = await r.json();
-  if (!data.ok) throw new Error(`Download failed: ${data.detail}`);
-  return atob(data.base64);
-}
-
-// ---------- main UI ----------
-const fileInput   = document.querySelector("#fileInput");
-const urlInput    = document.querySelector("#urlInput");
-const processBtn  = document.querySelector("#processBtn");
-
-processBtn.addEventListener("click", async () => {
-  try {
-    // 1) get image as base64
-    let base64;
-    if (fileInput.files.length) {
-      base64 = await new Promise((res, rej) => {
-        const fr = new FileReader();
-        fr.onload = () => res(fr.result.split(",")[1]);
-        fr.onerror = rej;
-        fr.readAsDataURL(fileInput.files[0]);
-      });
-    } else if (urlInput.value.trim()) {
-      base64 = (await fetch(DOWNLOAD_IMAGE_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: urlInput.value.trim() })
-      }).then(r => r.json())).base64;
-    } else {
-      alert("Provide an image or URL"); return;
-    }
-
-    // 2) detect objects
-    const annotations = await callDetect(base64);
-
-    // 3) for each object run reverse search (demo: first only)
-    if (!annotations.length) { alert("No objects found"); return; }
-
-    const cropBlob = fileInput.files[0];        // placeholder: use original for demo
-    const matches  = await reverseSearch(cropBlob);
-
-    console.log("Annotations →", annotations);
-    console.log("Reverse matches →", matches);
-    alert("Pipeline finished – check console for results");
-  } catch (e) {
-    console.error(e);
-    alert(e.message);
+  if (!processBtn) {
+    console.error("processBtn not found"); return;
   }
+
+  /* ---------- API endpoints ---------- */
+  const SUPABASE = "https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1";
+  const DOWNLOAD_IMAGE_API = `${SUPABASE}/download_image`;
+  const DETECT_API         = `${SUPABASE}/detect`;
+  const REVERSE_SEARCH_API =
+    "https://arcognition-search-490571042366.us-central1.run.app/reverse";
+
+  /* ---------- helper wrappers ---------- */
+  const fetchJson = (url, opts) => fetch(url, opts).then(r => r.json());
+
+  async function downloadToBase64(url) {
+    const res = await fetchJson(DOWNLOAD_IMAGE_API, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({url})
+    });
+    if (!res.ok) throw new Error(`download_image: ${res.detail}`);
+    return res.base64;
+  }
+
+  async function detect(base64) {
+    const res = await fetchJson(DETECT_API, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({base64})
+    });
+    if (!res.ok) throw new Error(`Vision API: ${res.stage} – ${res.detail}`);
+    return res.annotations;
+  }
+
+  async function reverseSearch(blob) {
+    const fd = new FormData();
+    fd.append("image", blob, "crop.jpg");
+    const res = await fetchJson(REVERSE_SEARCH_API, {method:"POST", body:fd});
+    return res;
+  }
+
+  /* ---------- main click handler ---------- */
+  processBtn.addEventListener("click", async e => {
+    e.preventDefault();
+    try {
+      // 1. get image as base64
+      let base64;
+      if (fileInput && fileInput.files.length) {
+        base64 = await new Promise((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(fr.result.split(",")[1]);
+          fr.onerror = reject;
+          fr.readAsDataURL(fileInput.files[0]);
+        });
+      } else if (urlInput && urlInput.value.trim()) {
+        base64 = await downloadToBase64(urlInput.value.trim());
+      } else {
+        alert("Provide an image file or URL"); return;
+      }
+
+      // 2. detect objects
+      const annotations = await detect(base64);
+      if (!annotations.length) { alert("No objects found"); return; }
+
+      // 3. (demo) run reverse search on full image
+      const blob = fileInput?.files[0] ??
+                   await fetch(`data:image/jpeg;base64,${base64}`).then(r=>r.blob());
+      const matches = await reverseSearch(blob);
+
+      console.log({ annotations, matches });
+      alert("Finished – open console for details");
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+    }
+  });
 });
