@@ -121,18 +121,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const excelRows = [];
       for (const ann of annotations) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1">${(ann.score*100).toFixed(1)}%</td>`;
-        resultsBody.appendChild(tr);
-
-        if (ann.bbox) {
-          const crop = await cropBlobFromBox(preview, ann.bbox);
-          const res = await reverseSearch(crop);
-          const links = res.links || res.urls || [];
-          links.slice(0, 5).forEach(link => {
-            excelRows.push({ Item: ann.name, Link: link });
-          });
-        }
+        if (!ann.bbox) continue;
+        const crop = await cropBlobFromBox(preview, ann.bbox);
+        const res = await reverseSearch(crop);
+        const items = res.results || [];
+        items.slice(0, 5).forEach((it) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1"><a href="${it.url}" target="_blank" class="text-blue-600 underline">${it.site}</a></td><td class="px-2 py-1">${it.price_eur ?? ""}</td>`;
+          resultsBody.appendChild(tr);
+          excelRows.push({ Item: ann.name, Site: it.site, Price: it.price_eur, Link: it.url });
+        });
       }
       resultsTable.classList.remove("hidden");
 

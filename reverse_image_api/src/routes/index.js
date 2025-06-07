@@ -9,6 +9,36 @@ const {
 const { reverse } = require("../modules");
 const cheerio = require("cheerio");
 
+function parsePrice(text) {
+  const m = text && text.match(/(?:€|EUR|Euro)\s*([0-9]+(?:[.,][0-9]+)?)/i);
+  if (!m) return null;
+  return parseFloat(m[1].replace(/,/g, "."));
+}
+
+async function scrapeInfo(url) {
+  try {
+    const page = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+      },
+    });
+    const $ = cheerio.load(page.data);
+    const title =
+      $("meta[property='og:title']").attr("content") || $("title").first().text();
+    const thumb = $("meta[property='og:image']").attr("content") || null;
+    const priceMeta =
+      $("meta[property='product:price:amount']").attr("content") ||
+      $("meta[itemprop='price']").attr("content");
+    const price = parsePrice(priceMeta || $.text());
+    const site = new URL(url).hostname.replace(/^www\./, "");
+    return { site, url, title, price_eur: price, thumbnail: thumb };
+  } catch (err) {
+    console.error("scrapeInfo", url, err.message);
+    return null;
+  }
+}
+
 const r = Router();
 const upload = multer();
 
@@ -61,7 +91,12 @@ r.post("/reverse", upload.single("image"), async (req, res) => {
           }
         });
       }
-      res.status(200).json({ links });
+      const results = [];
+      for (const url of links.slice(0, 5)) {
+        const info = await scrapeInfo(url);
+        if (info) results.push(info);
+      }
+      res.status(200).json({ results });
     } else {
       res.status(404).json(result);
     }

@@ -18,12 +18,12 @@ class ReverseSearch:
     def __init__(self, endpoint: str | None = None) -> None:
         self.endpoint = endpoint or self.REVERSE_SEARCH_ENDPOINT
 
-    def search(self, image_path: str) -> List[str]:
-        """Submit image and return product links."""
+    def search(self, image_path: str) -> List[dict]:
+        """Submit image and return product info dictionaries."""
         with open(image_path, "rb") as f:
             files = {"image": f}
             response = requests.post(self.endpoint, files=files, timeout=60)
         response.raise_for_status()
         data = response.json()
-        links = data.get("links") or []
-        return links[:10]
+        items = data.get("results") or []
+        return items

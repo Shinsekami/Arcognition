@@ -31,8 +31,9 @@ def process_image(image_path: str) -> str:
         if not bbox:
             continue
         cropped_path = cropper.crop(image_path, bbox, name, idx)
-        links = searcher.search(cropped_path)
-        for link in links:
+        items = searcher.search(cropped_path)
+        for item in items:
+            link = item.get("url")
             try:
                 data = scraper.scrape(link)
                 if data:
