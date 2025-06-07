@@ -3,8 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const fileInput = document.querySelector('input[type="file"]');
   const urlInput =
     document.querySelector('#urlInput') ||
-    document.querySelector('input[type="url"]') ||
-    document.querySelector('input[name="url"]');
+    document.querySelector('input[type="url"], input[type="text"]') ||
+    document.querySelector('textarea');
   const processBtn =
     document.querySelector('#processBtn') ||
     document.querySelector('button[type="submit"]');
@@ -64,16 +64,14 @@ document.addEventListener('DOMContentLoaded', () => {
       // 4a) Acquire base64
       let base64;
       if (fileInput?.files?.length) {
-        // from file input
         base64 = await new Promise((resolve, reject) => {
           const fr = new FileReader();
           fr.onload = () => resolve(fr.result.split(',')[1]);
           fr.onerror = reject;
           fr.readAsDataURL(fileInput.files[0]);
         });
-      } else if (urlInput?.value.trim()) {
-        // from URL input
-        console.log('⤷ Fetching URL:', urlInput.value.trim());
+      } else if (urlInput?.value?.trim()) {
+        console.log('⤷ URL input value:', urlInput.value.trim());
         base64 = await downloadToBase64(urlInput.value.trim());
       } else {
         alert('Provide an image file or URL');
@@ -87,7 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // 4c) Reverse-search demo on full image
+      // 4c) Reverse-search on full image (demo)
       const blob =
         fileInput?.files?.[0] ??
         (await fetch(`data:image/jpeg;base64,${base64}`).then(r => r.blob()));
@@ -95,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       console.log('✅ Annotations:', annotations);
       console.log('✅ Reverse matches:', matches);
-      alert('Pipeline complete! Check console for details.');
+      alert('Pipeline complete! Check the console.');
     } catch (err) {
       console.error(err);
       alert(err.message);
