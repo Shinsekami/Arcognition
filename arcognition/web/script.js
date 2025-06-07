@@ -25,8 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const DOWNLOAD_IMAGE_API = `${SUPABASE}/download_image`;
   const DETECT_API = `${SUPABASE}/detect`;
   const REVERSE_SEARCH_API =
-    'https://arcognition-search-490571042366.us-central1.run.app/reverse';
-
+    'https://arcognition-search-skujvj7jba-uc.a.run.app/reverse';
   /* ---------- helper wrappers ---------- */
   const fetchJson = (url, opts) => fetch(url, opts).then(r => r.json());
 
