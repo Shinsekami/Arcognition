@@ -1,0 +1,8 @@
+{
+  // Keep Deno _on_ for the workspace…
+  "deno.enable": true,
+  // …but only enable it inside the "supabase" folder:
+  "deno.enablePaths": [
+    "supabase/**"
+  ]
+}
