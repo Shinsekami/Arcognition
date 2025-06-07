@@ -4,50 +4,27 @@ document.addEventListener('DOMContentLoaded', () => {
   const log = (...args) => console.log('[Arcognition]', ...args);
 
   // DOM elements
-  const fileInput = document.querySelector('input[type="file"]');
-  const urlInput = document.querySelector('#urlInput');
-  const processBtn = document.querySelector('#processBtn');
-  const preview = document.querySelector('#preview');
-  const canvas = document.querySelector('#canvas');
+  const fileInput = document.getElementById('fileInput');
+  const urlInput = document.getElementById('urlInput');
+  const processBtn = document.getElementById('processBtn');
+  const preview = document.getElementById('preview');
+  const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
-  const resultsTable = document.querySelector('#resultsTable');
-  const resultsBody = document.querySelector('#resultsBody');
-  const downloadLink = document.querySelector('#downloadLink');
+  const resultsBody = document.getElementById('resultsBody');
+  const downloadLink = document.getElementById('downloadLink');
 
-  if (
-    !fileInput ||
-    !urlInput ||
-    !processBtn ||
-    !preview ||
-    !canvas ||
-    !ctx ||
-    !resultsTable ||
-    !resultsBody ||
-    !downloadLink
-  ) {
-    console.error('[Arcognition] Missing UI elements');
-    return;
-  }
-
-  // Endpoints
-  const SUPABASE_URL = 'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1';
-  const DOWNLOAD_IMAGE_API = `${SUPABASE_URL}/download_image`;
-  const DETECT_API = `${SUPABASE_URL}/detect`;
+  // API endpoints
+  const DOWNLOAD_IMAGE_API =
+    'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/download_image';
+  const DETECT_API =
+    'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/detect';
   const REVERSE_SEARCH_API =
-    'https://arcognition-search-490571042366.us-central1.run.app/reverse';
+    'https://arcognition-search-skujvj7jba-uc.a.run.app/reverse';
 
-  // Helper to fetch JSON
-  const fetchJson = (url, opts) =>
-    fetch(url, opts).then(async r => {
-      const text = await r.text();
-      try {
-        return JSON.parse(text);
-      } catch {
-        throw new Error(`Invalid JSON from ${url}: ${text}`);
-      }
-    });
+  // helper to fetch JSON
+  const fetchJson = (url, opts) => fetch(url, opts).then(r => r.json());
 
-  // Download URL → base64
+  // download image URL → base64
   async function downloadToBase64(url) {
     log('Downloading image:', url);
     const res = await fetchJson(DOWNLOAD_IMAGE_API, {
@@ -60,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return res.base64;
   }
 
-  // Call Vision detect
+  // Google Vision detect
   async function detect(base64) {
     log('Calling detect API');
     const res = await fetchJson(DETECT_API, {
@@ -73,7 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return res.annotations;
   }
 
-  // Call your reverse-search service
+  // reverse-image search
   async function reverseSearch(base64, annotation) {
     log('Reverse search for:', annotation.name);
     const resp = await fetch(REVERSE_SEARCH_API, {
@@ -87,42 +64,26 @@ document.addEventListener('DOMContentLoaded', () => {
     return Array.isArray(json.data?.results) ? json.data.results : [];
   }
 
-  // Crop thumbnail client-side
-  async function cropBlobFromBox(img, box) {
-    const c = document.createElement('canvas');
-    c.width = box.w;
-    c.height = box.h;
-    const cctx = c.getContext('2d');
-    cctx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
-    return await new Promise(res => c.toBlob(res, 'image/jpeg'));
-  }
-
-  processBtn.addEventListener('click', async e => {
-    e.preventDefault();
+  processBtn.addEventListener('click', async () => {
     log('Process clicked');
     processBtn.disabled = true;
     resultsBody.innerHTML = '';
-    resultsTable.classList.add('hidden');
     downloadLink.classList.add('hidden');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     try {
       // 1) Load image
-      let base64, blob;
+      let base64;
       if (fileInput.files.length) {
-        blob = fileInput.files[0];
         base64 = await new Promise((res, rej) => {
           const fr = new FileReader();
           fr.onload = () => res(fr.result.split(',')[1]);
           fr.onerror = rej;
-          fr.readAsDataURL(blob);
+          fr.readAsDataURL(fileInput.files[0]);
         });
-        preview.src = URL.createObjectURL(blob);
+        preview.src = URL.createObjectURL(fileInput.files[0]);
       } else if (urlInput.value.trim()) {
         base64 = await downloadToBase64(urlInput.value.trim());
-        blob = await fetch(`data:image/jpeg;base64,${base64}`).then(r =>
-          r.blob()
-        );
         preview.src = `data:image/jpeg;base64,${base64}`;
       } else {
         alert('Provide a file or URL');
@@ -130,33 +91,44 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       await new Promise(r => (preview.onload = r));
-      canvas.width = preview.naturalWidth;
-      canvas.height = preview.naturalHeight;
+      const imgW = preview.naturalWidth;
+      const imgH = preview.naturalHeight;
+      canvas.width = imgW;
+      canvas.height = imgH;
       ctx.drawImage(preview, 0, 0);
 
       // 2) Detect
       const annotations = await detect(base64);
       if (!annotations.length) {
         alert('No objects detected');
+        processBtn.disabled = false;
         return;
       }
 
-      // 3) Reverse-search & render
+      // 3) Reverse-search each annotation
       const excelRows = [];
-      resultsTable.classList.remove('hidden');
-
       for (const ann of annotations) {
-        log('Processing:', ann.name);
-        // Show thumbnail locally
-        const thumbBlob = await cropBlobFromBox(preview, ann.bbox);
-        // Perform server-side reverse search
+        // compute pixel-based bbox from normalized coords
+        const verts = ann.boundingPoly.normalizedVertices;
+        const x = verts[0].x * imgW;
+        const y = verts[0].y * imgH;
+        const w = (verts[2].x - verts[0].x) * imgW;
+        const h = (verts[2].y - verts[0].y) * imgH;
+        log(`BBox for ${ann.name}:`, { x, y, w, h });
+
+        // optional: draw box on canvas
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+
+        // server‐side reverse search
         const items = await reverseSearch(base64, ann);
-        log('Found items:', items.length);
+        log(`Items for "${ann.name}":`, items.length);
 
         if (!items.length) {
           resultsBody.insertAdjacentHTML(
             'beforeend',
-            `<tr><td>${ann.name}</td><td colspan="2">No matches found</td></tr>`
+            `<tr><td>${ann.name}</td><td colspan="2">No matches</td></tr>`
           );
           excelRows.push({ Item: ann.name, Site: '', Price: '', Link: '' });
         } else {
