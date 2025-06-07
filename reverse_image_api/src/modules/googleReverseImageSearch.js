@@ -1,60 +1,49 @@
-import sharp from 'sharp';
+// reverse_image_api/src/modules/googleReverseImageSearch.js
+
 import axios from 'axios';
-import { load } from 'cheerio';
 
 /**
- * Given a Base64‐encoded image and Vision annotations,
- * crops each detected object and reverse‐searches it,
- * scraping the top 5 matches for site, URL, price_eur, and thumbnail.
- *
- * @param {string} base64      Base64 image string
- * @param {Array}  annotations [{ name, boundingPoly: { normalizedVertices: [...] } }, …]
- * @returns {Promise<Array<{ site, url, price_eur, thumbnail }>>}
+ * For each annotation:
+ *  1) Upload the full-image + annotation to your Supabase function,
+ *  2) Grab back a public URL for the cropped image,
+ *  3) Call the google-reverse-image-api with that URL,
+ *  4) Return the JSON results.
  */
-export default async function googleReverseImageSearch(base64, annotations) {
-  // Decode Base64 to buffer
-  const imgBuffer = Buffer.from(base64, 'base64');
-  const { width: imgW, height: imgH } = await sharp(imgBuffer).metadata();
+export default async function reverseSearchViaSupabase(base64, annotations) {
+  const SUPABASE_UPLOAD =
+    'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/upload_crop';
+  const GOOGLE_REVERSE_API =
+    'https://google-reverse-image-api.vercel.app/reverse';
 
-  const allResults = [];
+  const all = [];
 
   for (const ann of annotations) {
-    const verts = ann.boundingPoly.normalizedVertices;
-    const left = Math.round(verts[0].x * imgW);
-    const top = Math.round(verts[0].y * imgH);
-    const width = Math.round((verts[2].x - verts[0].x) * imgW);
-    const height = Math.round((verts[2].y - verts[0].y) * imgH);
-
-    // Crop the object
-    const cropBuffer = await sharp(imgBuffer)
-      .extract({ left, top, width, height })
-      .toBuffer();
-
-    // Reverse‐image search via your scraper endpoint
-    const response = await axios.post(
-      'https://your-reverse-endpoint.example.com/search',
-      cropBuffer,
-      { headers: { 'Content-Type': 'application/octet-stream' } }
+    // 1) upload & crop on Supabase
+    const upload = await axios.post(
+      SUPABASE_UPLOAD,
+      { base64, annotation: ann },
+      { headers: { 'Content-Type': 'application/json' } }
     );
+    const { publicUrl } = upload.data;
+    if (!publicUrl) throw new Error('upload_crop returned no publicUrl');
 
-    // Parse HTML with Cheerio
-    const $ = load(response.data);
-    $('.product-item')
-      .slice(0, 5)
-      .each((_, el) => {
-        const site = $(el).find('.seller-name').text().trim();
-        const url = $(el).find('a.product-link').attr('href');
-        const priceText = $(el).find('.price').text().trim();
-        const price_eur = parseFloat(
-          priceText
-            .replace(/[^\d.,]/g, '')
-            .replace(/\./g, '')
-            .replace(',', '.')
-        );
-        const thumbnail = $(el).find('img.product-thumb').attr('src');
-        allResults.push({ site, url, price_eur, thumbnail });
-      });
+    // 2) reverse-image search that URL
+    const resp = await axios.post(
+      GOOGLE_REVERSE_API,
+      { imageUrl: publicUrl },
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    if (!resp.data.success) {
+      throw new Error('Reverse API failed: ' + resp.data.message);
+    }
+
+    // 3) collect the data you need
+    all.push({
+      name: ann.name,
+      similarUrl: resp.data.data.similarUrl,
+      resultText: resp.data.data.resultText,
+    });
   }
 
-  return allResults;
+  return all;
 }

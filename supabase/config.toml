@@ -1,0 +1,6 @@
+# supabase/config.toml
+
+[functions.upload_crop]
+enabled    = true
+verify_jwt = false        # set to true if you’re actually expecting a JWT from your client
+entrypoint = "./functions/upload_crop/index.js"
