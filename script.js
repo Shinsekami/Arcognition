@@ -1,7 +1,10 @@
 document.addEventListener("DOMContentLoaded", () => {
   // Grab elements safely
   const fileInput  = document.querySelector('input[type="file"]');
-  const urlInput   = document.querySelector('#urlInput') || document.querySelector('input[name="url"]');
+  const urlInput   =
+    document.querySelector('#urlInput') ||
+    document.querySelector('#imageUrl') ||
+    document.querySelector('input[name="url"]');
   const processBtn = document.querySelector('#processBtn') || document.querySelector('button[type="submit"]');
 
   if (!processBtn) {
