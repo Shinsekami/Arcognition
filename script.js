@@ -1,4 +1,5 @@
 console.log('👉 script.js loaded');
+
 document.addEventListener('DOMContentLoaded', () => {
   const log = (...args) => console.log('[Arcognition]', ...args);
 
@@ -38,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const REVERSE_SEARCH_API =
     'https://arcognition-search-490571042366.us-central1.run.app/reverse';
 
-  // fetch JSON helper
+  // helper to fetch and parse JSON
   const fetchJson = async (url, opts) => {
     const res = await fetch(url, opts);
     const txt = await res.text();
@@ -73,7 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return annotations;
   }
 
-  // call your reverse‐image‐search service
+  // call reverse‐image‐search service
   async function reverseSearch(base64, annotation) {
     log('Reverse search for:', annotation.name);
     const res = await fetch(REVERSE_SEARCH_API, {
@@ -87,12 +88,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const json = await res.json();
     log('[Arcognition] raw reverseSearch response:', json);
-    const results = Array.isArray(json.results)
+
+    // API returns { success, data: [ { object, reverse: [...] } ] }
+    const arr = Array.isArray(json.data)
+      ? json.data
+      : Array.isArray(json.results)
       ? json.results
       : Array.isArray(json.data?.results)
       ? json.data.results
       : [];
-    return results;
+
+    if (!arr.length) return [];
+    const entry = arr[0];
+    return Array.isArray(entry.reverse) ? entry.reverse : [];
   }
 
   // file → base64
@@ -127,8 +135,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       await new Promise(r => (preview.onload = r));
-      const W = preview.naturalWidth;
-      const H = preview.naturalHeight;
+      const W = preview.naturalWidth,
+        H = preview.naturalHeight;
       canvas.width = W;
       canvas.height = H;
       ctx.drawImage(preview, 0, 0);
@@ -141,32 +149,29 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // 3) for each annotation: draw box + reverse search + render
+      // 3) for each annotation: draw bbox → reverse search → render
       const excelRows = [];
       for (const ann of annotations) {
-        // compute pixel bbox
         const v = ann.boundingPoly.normalizedVertices;
-        const x = v[0].x * W;
-        const y = v[0].y * H;
-        const w = (v[1].x - v[0].x) * W;
-        const h = (v[3].y - v[0].y) * H;
+        const x = v[0].x * W,
+          y = v[0].y * H;
+        const w = (v[1].x - v[0].x) * W,
+          h = (v[3].y - v[0].y) * H;
 
-        // draw the box
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, w, h);
 
-        // reverse‐image search
-        const items = await reverseSearch(base64, ann);
+        const matches = await reverseSearch(base64, ann);
 
-        if (!items.length) {
+        if (!matches.length) {
           resultsBody.insertAdjacentHTML(
             'beforeend',
             `<tr><td>${ann.name}</td><td colspan="2">No matches</td></tr>`
           );
           excelRows.push({ Item: ann.name, Site: '', Price: '', Link: '' });
         } else {
-          items.slice(0, 5).forEach(it => {
+          matches.slice(0, 5).forEach(it => {
             resultsBody.insertAdjacentHTML(
               'beforeend',
               `<tr>
