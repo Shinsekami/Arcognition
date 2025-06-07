@@ -1,4 +1,5 @@
 // src/modules/googleReverseImageSearch.js
+
 const vision = require('@google-cloud/vision');
 const axios = require('axios');
 const cheerio = require('cheerio');
@@ -15,13 +16,15 @@ async function getRates() {
   return eurRates;
 }
 
-// loose price extractor
+// loose price extractor for arbitrary text snippets
 function extractPrice(text) {
-  const re = /([€$£])\s*([\d.,\s]+)/;
-  const m = re.exec(text);
+  // allow symbol before or after, commas, dots, spaces
+  const re = /([€$£])\s*([\d.,\s]+)|([\d.,\s]+)\s*([€$£])/;
+  const m = text.match(re);
   if (!m) return null;
-  const symbol = m[1];
-  const amount = parseFloat(m[2].replace(/[,\s]/g, ''));
+  let symbol = m[1] || m[4];
+  let amount = (m[2] || m[3]).replace(/[,\s]/g, '');
+  amount = parseFloat(amount);
   return { symbol, amount };
 }
 
@@ -31,40 +34,73 @@ function extractPrice(text) {
  * @returns {Promise<Array<{site,url,thumbnail,price_eur}>>}
  */
 async function googleReverseSearch(cropBuf, label) {
-  // 1) reverse‐image search via Vision
+  // 1) reverse‐image via Vision Web Detection
   const [vd] = await visionClient.webDetection({ image: { content: cropBuf } });
   const pages = vd.webDetection.pagesWithMatchingImages || [];
-  console.log(`[vision] ${label} → pages:`, pages);
+  console.log(
+    `[vision] ${label} → pages found:`,
+    pages.map(p => p.url || p)
+  );
 
   const rates = await getRates();
-  const out = [];
+  const results = [];
 
-  for (const pageUrl of pages.slice(0, 5)) {
+  for (const pageInfo of pages.slice(0, 5)) {
+    const pageUrl = pageInfo.url || pageInfo;
     try {
       console.log(`[scrape] fetching ${pageUrl}`);
       const { data: html } = await axios.get(pageUrl, { timeout: 5000 });
-      console.log(`[scrape] html snippet:`, html.slice(0, 200));
-
       const $ = cheerio.load(html);
 
-      // thumbnail: prefer fullMatchingImages URL if provided
+      // determine hostname
+      const hostname = new URL(pageUrl).hostname.replace(/^www\./, '');
+      console.log(`[scrape] site: ${hostname}`);
+
+      // 2) thumbnail selection
       const matchImg = vd.webDetection.fullMatchingImages?.[0]?.url;
       const thumb =
+        matchImg ||
         $('meta[property="og:image"]').attr('content') ||
-        $('img').first().attr('src') ||
-        matchImg;
-      console.log(`[scrape] thumbnail →`, thumb);
+        $('img')
+          .filter((i, el) => {
+            const w = parseInt($(el).attr('width') || '0', 10);
+            return w >= 100;
+          })
+          .first()
+          .attr('src') ||
+        $('img').first().attr('src');
+      console.log(`[scrape] thumbnail → ${thumb}`);
 
-      // grab text to search for price
-      const bodyText = $('body').text().slice(0, 1000).replace(/\s+/g, ' ');
-      console.log(`[scrape] text snippet →`, bodyText.slice(0, 100));
+      // 3) price extraction (site-specific)
+      let priceText = null;
+      if (hostname.includes('amazon.')) {
+        priceText =
+          $('#priceblock_ourprice').text().trim() ||
+          $('#priceblock_dealprice').text().trim() ||
+          $('#price_inside_buybox').text().trim() ||
+          $('span.a-offscreen').first().text().trim();
+      } else if (hostname.includes('ebay.')) {
+        priceText =
+          $('.display-price').text().trim() ||
+          $('.notranslate').first().text().trim();
+      } else {
+        // generic: scan meta tag or body text
+        priceText =
+          $('meta[itemprop="price"]').attr('content') ||
+          $('body')
+            .text()
+            .match(/([€$£]\s?[\d.,\s]+)/)?.[0] ||
+          null;
+      }
+      console.log(`[scrape] priceText → ${priceText}`);
 
-      const pr = extractPrice(bodyText);
+      const pr = priceText ? extractPrice(priceText) : null;
       if (!pr) {
-        console.warn(`[scrape] no price on ${pageUrl}`);
+        console.warn(`[scrape] no price parsed on ${hostname}`);
         continue;
       }
 
+      // 4) convert to EUR
       let { symbol, amount } = pr;
       let price_eur = amount;
       if (symbol !== '€') {
@@ -74,20 +110,19 @@ async function googleReverseSearch(cropBuf, label) {
         }
       }
 
-      out.push({
-        site: new URL(pageUrl).hostname.replace(/^www\./, ''),
+      results.push({
+        site: hostname,
         url: pageUrl,
         thumbnail: thumb,
         price_eur: Number(price_eur.toFixed(2)),
       });
-
-      console.log(`[scrape] success ${pageUrl} → €${price_eur.toFixed(2)}`);
+      console.log(`[scrape] success ${hostname} → €${price_eur.toFixed(2)}`);
     } catch (err) {
       console.error(`[scrape] error on ${pageUrl}:`, err.message);
     }
   }
 
-  return out;
+  return results;
 }
 
 module.exports = { googleReverseSearch };
