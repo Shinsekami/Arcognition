@@ -1,4 +1,4 @@
-class BaseResponseObject {
+export class BaseResponseObject {
   constructor(success, message, data = null) {
     this.success = success;
     this.message = message;
@@ -6,18 +6,14 @@ class BaseResponseObject {
   }
 }
 
-exports.SuccessResponseObject = class SuccessResponseObject extends (
-  BaseResponseObject
-) {
+export class SuccessResponseObject extends BaseResponseObject {
   constructor(message, data) {
     super(true, message, data);
   }
-};
+}
 
-exports.ErrorResponseObject = class ErrorResponseObject extends (
-  BaseResponseObject
-) {
+export class ErrorResponseObject extends BaseResponseObject {
   constructor(message, data) {
     super(false, message, data);
   }
-};
+}
