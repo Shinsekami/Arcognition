@@ -1,16 +1,11 @@
-// script.js
-
-console.log('👉 script.js loaded');
-
 document.addEventListener('DOMContentLoaded', () => {
   const log = (...args) => console.log('[Arcognition]', ...args);
 
   // UI elements
   const fileInput = document.querySelector('input[type="file"]');
-  // Prefer input[name="url"], fallback to input[type="text"]
-  const urlInput =
-    document.querySelector('input[name="url"]') ||
-    document.querySelector('input[type="text"]');
+  const urlInput = document.querySelector(
+    'input[type="text"], input[name="url"]'
+  );
   const processBtn = document.querySelector(
     'button#processBtn, button[type="submit"], button'
   );
@@ -35,14 +30,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // API endpoints
-  const DOWNLOAD_IMAGE_API =
+  const DOWNLOAD_API =
     'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/download_image';
   const DETECT_API =
     'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/detect';
-  const REVERSE_SEARCH_API =
+  const REVERSE_API =
     'https://arcognition-search-490571042366.us-central1.run.app/reverse';
 
-  // helper to fetch and parse JSON
+  // Helper to fetch and parse JSON
   async function fetchJson(url, opts) {
     const res = await fetch(url, opts);
     const txt = await res.text();
@@ -53,10 +48,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // download URL → base64 via Supabase
+  // Download URL → base64 via Supabase
   async function downloadToBase64(url) {
     log('Downloading image:', url);
-    const { base64 } = await fetchJson(DOWNLOAD_IMAGE_API, {
+    const { base64 } = await fetchJson(DOWNLOAD_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -65,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return base64;
   }
 
-  // call Vision detect
+  // Call detect API
   async function detect(base64) {
     log('Calling detect API');
     const { annotations } = await fetchJson(DETECT_API, {
@@ -77,13 +72,16 @@ document.addEventListener('DOMContentLoaded', () => {
     return annotations;
   }
 
-  // call reverse‐image‐search service
-  async function reverseSearch(base64, annotation) {
-    log('Reverse search for:', annotation.name);
-    const res = await fetch(REVERSE_SEARCH_API, {
+  // Call reverse‐image‐search service
+  async function reverseSearch(base64, annotations) {
+    log(
+      'Reverse search for annotations:',
+      annotations.map(a => a.name)
+    );
+    const res = await fetch(REVERSE_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64, annotations: [annotation] }),
+      body: JSON.stringify({ base64, annotations }),
     });
     if (!res.ok) {
       const body = await res.text();
@@ -91,12 +89,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const json = await res.json();
     log('[Arcognition] raw reverseSearch response:', json);
-
-    // API actually returns { success, data: [ { object, reverse: [...] }, … ] }
-    return Array.isArray(json.data) ? json.data : [];
+    // Expect json.data = [ { object, reverse:[…] }, … ]
+    if (!json.success || !Array.isArray(json.data)) {
+      throw new Error('Unexpected reverseSearch response shape');
+    }
+    return json.data;
   }
 
-  // file → base64
+  // File → base64
   function getBase64FromFile(file) {
     return new Promise((resolve, reject) => {
       const fr = new FileReader();
@@ -114,7 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     try {
-      // 1) load image → base64 + preview
+      // 1) Load image → base64 + preview
       let base64;
       if (fileInput.files.length) {
         base64 = await getBase64FromFile(fileInput.files[0]);
@@ -128,19 +128,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       await new Promise(r => (preview.onload = r));
-      await new Promise(r => {
-        if (preview.complete && preview.naturalWidth !== 0) {
-          r();
-        } else {
-          preview.onload = () => r();
-        }
-      });
       const W = preview.naturalWidth,
         H = preview.naturalHeight;
       canvas.width = W;
       canvas.height = H;
       ctx.drawImage(preview, 0, 0);
-      // 2) detect objects
+
+      // 2) Detect objects
       const annotations = await detect(base64);
       log('[Arcognition] Annotations found', annotations.length);
       if (!annotations.length) {
@@ -148,57 +142,52 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // 3) for each annotation: draw bbox → reverse search → render
-      const excelRows = [];
-      for (const ann of annotations) {
-        // draw bounding box
+      // Draw all bounding boxes
+      annotations.forEach(ann => {
         const v = ann.boundingPoly.normalizedVertices;
-        // Ensure there are at least 4 vertices
-        if (!Array.isArray(v) || v.length < 4) continue;
         const x = v[0].x * W,
           y = v[0].y * H;
-        const w = (v[2].x - v[0].x) * W,
-          h = (v[2].y - v[0].y) * H;
+        const w = (v[1].x - v[0].x) * W,
+          h = (v[3].y - v[0].y) * H;
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, w, h);
+      });
 
-        // reverse search returns array of all objects; pick this one
-        const data = await reverseSearch(base64, ann);
-        const entry = data.find(e => e.object === ann.name) || { reverse: [] };
-        const matches = Array.isArray(entry.reverse) ? entry.reverse : [];
+      // 3) Reverse search
+      const resultsArray = await reverseSearch(base64, annotations);
 
-        if (!matches.length) {
+      // 4) Render each object’s results
+      const excelRows = [];
+      resultsArray.forEach(({ object, reverse }) => {
+        if (!reverse.length) {
           resultsBody.insertAdjacentHTML(
             'beforeend',
-            `<tr><td>${ann.name}</td><td colspan="2">No matches</td></tr>`
+            `<tr><td>${object}</td><td colspan="2">No matches</td></tr>`
           );
-          excelRows.push({ Item: ann.name, Site: '', Price: '', Link: '' });
+          excelRows.push({ Item: object, Site: '', Price: '', Link: '' });
         } else {
-          matches.slice(0, 5).forEach(it => {
+          reverse.slice(0, 5).forEach(it => {
             resultsBody.insertAdjacentHTML(
               'beforeend',
               `<tr>
-                 <td>${ann.name}</td>
+                 <td>${object}</td>
                  <td><a href="${it.url}" target="_blank">${it.site}</a></td>
                  <td>€${it.price_eur}</td>
                </tr>`
             );
             excelRows.push({
-              Item: ann.name,
+              Item: object,
               Site: it.site,
               Price: it.price_eur,
               Link: it.url,
             });
           });
         }
-      }
-      // 4) generate Excel via SheetJS
+      });
+
+      // 5) Generate Excel via SheetJS
       if (excelRows.length) {
-        if (typeof XLSX === 'undefined') {
-          alert('SheetJS (XLSX) library is not loaded.');
-          return;
-        }
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(excelRows);
         XLSX.utils.book_append_sheet(wb, ws, 'Report');
