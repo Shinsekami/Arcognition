@@ -1,3 +1,5 @@
+// script.js
+
 console.log('👉 script.js loaded');
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -5,9 +7,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // UI elements
   const fileInput = document.querySelector('input[type="file"]');
-  const urlInput = document.querySelector(
-    'input[type="text"], input[name="url"]'
-  );
+  // Prefer input[name="url"], fallback to input[type="text"]
+  const urlInput =
+    document.querySelector('input[name="url"]') ||
+    document.querySelector('input[type="text"]');
   const processBtn = document.querySelector(
     'button#processBtn, button[type="submit"], button'
   );
@@ -40,7 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'https://arcognition-search-490571042366.us-central1.run.app/reverse';
 
   // helper to fetch and parse JSON
-  const fetchJson = async (url, opts) => {
+  async function fetchJson(url, opts) {
     const res = await fetch(url, opts);
     const txt = await res.text();
     try {
@@ -48,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch {
       throw new Error(`Invalid JSON from ${url}: ${txt}`);
     }
-  };
+  }
 
   // download URL → base64 via Supabase
   async function downloadToBase64(url) {
@@ -89,18 +92,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const json = await res.json();
     log('[Arcognition] raw reverseSearch response:', json);
 
-    // API returns { success, data: [ { object, reverse: [...] } ] }
-    const arr = Array.isArray(json.data)
-      ? json.data
-      : Array.isArray(json.results)
-      ? json.results
-      : Array.isArray(json.data?.results)
-      ? json.data.results
-      : [];
-
-    if (!arr.length) return [];
-    const entry = arr[0];
-    return Array.isArray(entry.reverse) ? entry.reverse : [];
+    // API actually returns { success, data: [ { object, reverse: [...] }, … ] }
+    return Array.isArray(json.data) ? json.data : [];
   }
 
   // file → base64
@@ -135,12 +128,18 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       await new Promise(r => (preview.onload = r));
+      await new Promise(r => {
+        if (preview.complete && preview.naturalWidth !== 0) {
+          r();
+        } else {
+          preview.onload = () => r();
+        }
+      });
       const W = preview.naturalWidth,
         H = preview.naturalHeight;
       canvas.width = W;
       canvas.height = H;
       ctx.drawImage(preview, 0, 0);
-
       // 2) detect objects
       const annotations = await detect(base64);
       log('[Arcognition] Annotations found', annotations.length);
@@ -152,17 +151,22 @@ document.addEventListener('DOMContentLoaded', () => {
       // 3) for each annotation: draw bbox → reverse search → render
       const excelRows = [];
       for (const ann of annotations) {
+        // draw bounding box
         const v = ann.boundingPoly.normalizedVertices;
+        // Ensure there are at least 4 vertices
+        if (!Array.isArray(v) || v.length < 4) continue;
         const x = v[0].x * W,
           y = v[0].y * H;
-        const w = (v[1].x - v[0].x) * W,
-          h = (v[3].y - v[0].y) * H;
-
+        const w = (v[2].x - v[0].x) * W,
+          h = (v[2].y - v[0].y) * H;
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, w, h);
 
-        const matches = await reverseSearch(base64, ann);
+        // reverse search returns array of all objects; pick this one
+        const data = await reverseSearch(base64, ann);
+        const entry = data.find(e => e.object === ann.name) || { reverse: [] };
+        const matches = Array.isArray(entry.reverse) ? entry.reverse : [];
 
         if (!matches.length) {
           resultsBody.insertAdjacentHTML(
@@ -189,9 +193,12 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         }
       }
-
       // 4) generate Excel via SheetJS
       if (excelRows.length) {
+        if (typeof XLSX === 'undefined') {
+          alert('SheetJS (XLSX) library is not loaded.');
+          return;
+        }
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(excelRows);
         XLSX.utils.book_append_sheet(wb, ws, 'Report');
