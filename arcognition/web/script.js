@@ -1,3 +1,5 @@
+console.log('👉 script.js loaded');
+
 document.addEventListener('DOMContentLoaded', () => {
   const log = (...args) => console.log('[Arcognition]', ...args);
 
