@@ -7,19 +7,18 @@ import { ErrorResponseObject } from './common/http.js';
 
 const app = express();
 
-// 1) Trust Cloud Run’s proxy (X-Forwarded-For)
+// 1) Trust Cloud Run’s proxy so X-Forwarded-For is honored
 app.set('trust proxy', 1);
 
-// 2) CORS — allow your GitHub Pages origin and handle preflight
+// 2) Enable CORS for your GitHub Pages origin (and OPTIONS preflight)
 app.use(
   cors({
     origin: 'https://shinsekami.github.io',
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    preflightContinue: false,
-    optionsSuccessStatus: 204,
   })
 );
+app.options('*', cors());
 
 // 3) Security headers
 app.use(helmet());
@@ -27,7 +26,7 @@ app.use(helmet());
 // 4) Parse JSON bodies (up to 10 MB)
 app.use(express.json({ limit: '10mb' }));
 
-// 5) Rate limit: 20 requests/minute/IP
+// 5) Rate limiting: max 20 requests per minute per IP
 app.use(
   rateLimit({
     windowMs: 60 * 1000,
@@ -40,13 +39,13 @@ app.use(
   })
 );
 
-// 6) Mount your routes
+// 6) Mount download_image, detect, and reverse routes
 app.use('/', router);
 
-// 7) 404 catch-all
-app.all('*', (req, res) => {
-  res.status(404).json(new ErrorResponseObject('Route not defined'));
-});
+// 7) 404 for anything else
+app.all('*', (req, res) =>
+  res.status(404).json(new ErrorResponseObject('Route not defined'))
+);
 
 // 8) Global error handler
 app.use((err, req, res, next) => {
@@ -57,8 +56,8 @@ app.use((err, req, res, next) => {
     .json(new ErrorResponseObject(err.message || 'Internal Server Error'));
 });
 
-// 9) Start server
-const PORT = process.env.PORT || 5000;
+// 9) Start the server
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`Reverse‐Image API running on port ${PORT}`);
+  console.log(`Reverse‐Image API listening on port ${PORT}`);
 });
