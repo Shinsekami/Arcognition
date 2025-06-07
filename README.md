@@ -7,8 +7,9 @@ Arcognition is a simple online tool that finds furniture from any room image and
 ## How to use
 1. Open **https://shinsekami.github.io/Arcognition**
 2. Upload an image **or** paste an image URL.
-3. Click **Process** and wait a few seconds.
-4. Download the Excel report.
+3. Click **Process** and wait a few seconds while items are detected.
+4. Review the highlighted objects and matching links.
+5. Click **Download Excel Report** to save the results.
 
 Use it to identify pieces from moodboards, real rooms, or 3D renders and quickly compare prices.
 

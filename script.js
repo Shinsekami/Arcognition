@@ -1,14 +1,23 @@
 document.addEventListener("DOMContentLoaded", () => {
   // Grab elements safely
-  const fileInput  = document.querySelector('input[type="file"]');
-  const urlInput   =
+  const fileInput = document.querySelector('input[type="file"]');
+  const urlInput =
     document.querySelector('#urlInput') ||
     document.querySelector('#imageUrl') ||
     document.querySelector('input[name="url"]');
-  const processBtn = document.querySelector('#processBtn') || document.querySelector('button[type="submit"]');
+  const processBtn =
+    document.querySelector('#processBtn') ||
+    document.querySelector('button[type="submit"]');
+  const preview = document.querySelector('#preview');
+  const canvas = document.querySelector('#canvas');
+  const ctx = canvas?.getContext('2d');
+  const resultsTable = document.querySelector('#resultsTable');
+  const resultsBody = document.querySelector('#resultsBody');
+  const downloadLink = document.querySelector('#downloadLink');
 
-  if (!processBtn) {
-    console.error("processBtn not found"); return;
+  if (!processBtn || !preview || !canvas || !ctx) {
+    console.error('Required elements missing');
+    return;
   }
 
   /* ---------- API endpoints ---------- */
@@ -20,6 +29,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* ---------- helper wrappers ---------- */
   const fetchJson = (url, opts) => fetch(url, opts).then(r => r.json());
+
+  function drawBoxes(anns) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    anns.forEach(a => {
+      const { x, y, w, h } = a.bbox || {};
+      ctx.strokeStyle = 'red';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+    });
+  }
+
+  async function cropBlobFromBox(img, box) {
+    const c = document.createElement('canvas');
+    c.width = box.w;
+    c.height = box.h;
+    const cctx = c.getContext('2d');
+    cctx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+    return await new Promise(res => c.toBlob(res, 'image/jpeg'));
+  }
 
   async function downloadToBase64(url) {
     const res = await fetchJson(DOWNLOAD_IMAGE_API, {
@@ -51,36 +79,79 @@ document.addEventListener("DOMContentLoaded", () => {
   /* ---------- main click handler ---------- */
   processBtn.addEventListener("click", async e => {
     e.preventDefault();
+    processBtn.disabled = true;
+    resultsBody.innerHTML = "";
+    downloadLink.classList.add("hidden");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     try {
-      // 1. get image as base64
-      let base64;
+      // 1. get image as base64 and preview
+      let base64, blob;
       if (fileInput && fileInput.files.length) {
-        base64 = await new Promise((resolve, reject) => {
+        blob = fileInput.files[0];
+        base64 = await new Promise((res, rej) => {
           const fr = new FileReader();
-          fr.onload = () => resolve(fr.result.split(",")[1]);
-          fr.onerror = reject;
-          fr.readAsDataURL(fileInput.files[0]);
+          fr.onload = () => res(fr.result.split(",")[1]);
+          fr.onerror = rej;
+          fr.readAsDataURL(blob);
         });
+        preview.src = URL.createObjectURL(blob);
       } else if (urlInput && urlInput.value.trim()) {
         base64 = await downloadToBase64(urlInput.value.trim());
+        blob = await fetch(`data:image/jpeg;base64,${base64}`).then(r => r.blob());
+        preview.src = `data:image/jpeg;base64,${base64}`;
       } else {
-        alert("Provide an image file or URL"); return;
+        alert("Provide an image file or URL");
+        return;
       }
+
+      await new Promise(res => (preview.onload = res));
+      canvas.width = preview.naturalWidth;
+      canvas.height = preview.naturalHeight;
+      preview.classList.remove("hidden");
+      canvas.classList.remove("hidden");
 
       // 2. detect objects
       const annotations = await detect(base64);
-      if (!annotations.length) { alert("No objects found"); return; }
+      if (!annotations.length) {
+        alert("No objects found");
+        return;
+      }
 
-      // 3. (demo) run reverse search on full image
-      const blob = fileInput?.files[0] ??
-                   await fetch(`data:image/jpeg;base64,${base64}`).then(r=>r.blob());
-      const matches = await reverseSearch(blob);
+      drawBoxes(annotations);
 
-      console.log({ annotations, matches });
-      alert("Finished – open console for details");
+      const excelRows = [];
+      for (const ann of annotations) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td class="px-2 py-1">${ann.name}</td><td class="px-2 py-1">${(ann.score*100).toFixed(1)}%</td>`;
+        resultsBody.appendChild(tr);
+
+        if (ann.bbox) {
+          const crop = await cropBlobFromBox(preview, ann.bbox);
+          const res = await reverseSearch(crop);
+          const links = res.links || res.urls || [];
+          links.slice(0, 5).forEach(link => {
+            excelRows.push({ Item: ann.name, Link: link });
+          });
+        }
+      }
+      resultsTable.classList.remove("hidden");
+
+      if (excelRows.length) {
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(excelRows);
+        XLSX.utils.book_append_sheet(wb, ws, "Results");
+        const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+        const excelBlob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+        downloadLink.href = URL.createObjectURL(excelBlob);
+        downloadLink.download = "arcognition_report.xlsx";
+        downloadLink.classList.remove("hidden");
+      }
+
     } catch (err) {
       console.error(err);
       alert(err.message);
+    } finally {
+      processBtn.disabled = false;
     }
   });
 });

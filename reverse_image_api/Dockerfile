@@ -1,14 +1,9 @@
-# reverse_image_api/Dockerfile
-FROM node:20-slim
+FROM node:18
 
 WORKDIR /app
+COPY . .
 
-# (optional) silence npm notice
-ENV npm_config_loglevel=error
-
-COPY package*.json ./
 RUN npm install
 
-COPY . .
 EXPOSE 8080
-CMD ["node","src/app.js"]
+CMD ["node", "src/app.js"]
