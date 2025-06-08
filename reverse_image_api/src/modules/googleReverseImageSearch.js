@@ -1,217 +1,107 @@
+// src/modules/googleReverseImageSearch.js
+
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
 const vision = require('@google-cloud/vision');
-const axios = require('axios');
-const cheerio = require('cheerio');
 
 const visionClient = new vision.ImageAnnotatorClient();
-let eurRates = null;
 
-// 1. Fetch & cache EUR exchange rates
-async function getRates() {
-  if (eurRates) return eurRates;
-  const resp = await axios.get('https://api.exchangerate.host/latest?base=EUR');
-  eurRates = resp.data.rates;
-  console.log('[rates] loaded EUR rates');
-  return eurRates;
-}
-
-// 2. Universal price extractor: symbols ₹ € $ £ OR 3-letter codes before/after
-function extractPrice(text) {
-  const re =
-    /([₹€$£])\s*([\d.,\s]+)|([\d.,\s]+)\s*([₹€$£])|([\d.,\s]+)([A-Z]{3})|([A-Z]{3})([\d.,\s]+)/;
-  const m = text.match(re);
-  if (!m) return null;
-
-  let symbol, raw;
-  if (m[1] && m[2]) {
-    // symbol before amount
-    symbol = m[1];
-    raw = m[2];
-  } else if (m[4] && m[3]) {
-    // symbol after
-    symbol = m[4];
-    raw = m[3];
-  } else if (m[6] && m[5]) {
-    // code after
-    symbol = m[6];
-    raw = m[5];
-  } else if (m[7] && m[8]) {
-    // code before
-    symbol = m[7];
-    raw = m[8];
-  } else {
-    return null;
-  }
-
-  const amount = parseFloat(raw.replace(/[,\s]/g, ''));
-  if (isNaN(amount)) return null;
-  return { symbol, amount };
+/**
+ * Launch a headless browser with desktop emulation.
+ */
+async function launchBrowser() {
+  return puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    defaultViewport: { width: 1280, height: 800 },
+  });
 }
 
 /**
- * Reverse‐image search + scraping for furniture item.
- * @param {Buffer} cropBuf  JPEG/PNG buffer of the cropped object
- * @param {string} label    Detected object name (e.g. "Couch")
- * @returns {Promise<Array<{site,url,thumbnail,price_eur}>>}
+ * Convert Vision webDetection pages if Lens fails.
+ */
+async function fallbackVision(cropBuf, label) {
+  console.warn(`[lens] Falling back to Vision webDetection for "${label}"`);
+  const [vd] = await visionClient.webDetection({ image: { content: cropBuf } });
+  return (vd.webDetection.pagesWithMatchingImages || []).slice(0, 5).map(p => ({
+    site: new URL(p.url || p).hostname.replace(/^www\./, ''),
+    url: p.url || p,
+    thumbnail: vd.webDetection.fullMatchingImages?.[0]?.url || null,
+    price_eur: null,
+  }));
+}
+
+/**
+ * Reverse‐image search via Google Lens UI in Puppeteer.
  */
 async function googleReverseSearch(cropBuf, label) {
-  // 1) Vision Web Detection
-  const [vd] = await visionClient.webDetection({ image: { content: cropBuf } });
-  const pages = vd.webDetection.pagesWithMatchingImages || [];
-  console.log(`[vision] ${label} → found ${pages.length} pages`);
+  console.log(`[lens] "${label}" → launching browser`);
+  let browser,
+    page,
+    results = [];
 
-  const rates = await getRates();
-  const results = [];
-
-  for (const pi of pages.slice(0, 5)) {
-    const pageUrl = pi.url || pi;
-    console.log(`[scrape] fetching ${pageUrl}`);
-
-    let html;
-    try {
-      html = (await axios.get(pageUrl, { timeout: 8000 })).data;
-    } catch (err) {
-      console.error(`[scrape] error fetching ${pageUrl}:`, err.message);
-      continue;
-    }
-
-    const $ = cheerio.load(html);
-    const hostname = new URL(pageUrl).hostname.replace(/^www\./, '');
-    console.log(`[scrape] site: ${hostname}`);
-
-    // 2) Detect presence of enough structured data to treat it as a product page
-    const hasJsonLdProduct = $('script[type="application/ld+json"]')
-      .toArray()
-      .some(el => {
-        try {
-          const o = JSON.parse($(el).html());
-          return o['@type'] === 'Product';
-        } catch {
-          return false;
-        }
-      });
-    const hasOgPrice = !!$('meta[property="product:price:amount"]').attr(
-      'content'
+  try {
+    browser = await launchBrowser();
+    page = await browser.newPage();
+    // Emulate a real browser
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+        'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+        'Chrome/114.0.0.0 Safari/537.36'
     );
-    const isAmazon = hostname.includes('amazon.');
-    const isEbay = hostname.includes('ebay.');
 
-    if (!hasJsonLdProduct && !hasOgPrice && !isAmazon && !isEbay) {
-      console.log(`[scrape] skipping ${hostname}, not a product page`);
-      continue;
-    }
+    // 1) Go to Lens
+    await page.goto('https://lens.google.com/upload', {
+      waitUntil: 'networkidle2',
+    });
 
-    // 3) Pick thumbnail (same universal logic)
-    const ldImages = $('script[type="application/ld+json"]')
-      .map((i, el) => {
-        try {
-          const o = JSON.parse($(el).html());
-          if (o['@type'] === 'Product' && o.image) {
-            return Array.isArray(o.image) ? o.image[0] : o.image;
-          }
-        } catch {}
-        return null;
-      })
-      .get()
-      .find(Boolean);
+    // 2) Upload the image
+    const tmpFile = path.join(process.cwd(), 'tmp_lens.jpg');
+    fs.writeFileSync(tmpFile, cropBuf);
+    const input = await page.$('input[type=file]');
+    if (!input) throw new Error('Lens file input not found');
+    await input.uploadFile(tmpFile);
 
-    const thumb =
-      vd.webDetection.fullMatchingImages?.[0]?.url ||
-      ldImages ||
-      $('meta[property="og:image"]').attr('content') ||
-      $('[itemprop="image"]').attr('content') ||
-      $('img')
-        .filter((i, el) =>
-          /product|catalog|item|thumb/i.test($(el).attr('src') || '')
-        )
-        .first()
-        .attr('src') ||
-      $('img').first().attr('src');
+    // 3) Wait for URL change to results page
+    await page.waitForFunction(() => location.pathname.startsWith('/results'), {
+      timeout: 20000,
+    });
 
-    console.log(`[scrape] thumbnail → ${thumb}`);
+    // 4) Wait for the shopping-results container to appear
+    await page.waitForSelector('c-wiz[section-type="shopping_results"]', {
+      timeout: 20000,
+    });
 
-    // 4) Price detection
-    let priceText = null;
+    // 5) Extract up to 5 items
+    const items = await page.$$eval(
+      'c-wiz[section-type="shopping_results"] .sh-dgr__container',
+      nodes =>
+        nodes.slice(0, 5).map(n => {
+          const linkEl = n.querySelector('a[href]');
+          const imgEl = n.querySelector('img[src]');
+          const priceEl = n.querySelector('.T14wmb, .sh-dgr__price');
+          return {
+            link: linkEl?.href || null,
+            thumbnail: imgEl?.src || null,
+            priceText: priceEl?.textContent.trim() || '',
+          };
+        })
+    );
 
-    // a) Amazon
-    if (isAmazon) {
-      priceText =
-        $('#priceblock_ourprice').text().trim() ||
-        $('#priceblock_dealprice').text().trim() ||
-        (() => {
-          const w = $('span.a-price-whole').first().text().trim();
-          const f = $('span.a-price-fraction').first().text().trim();
-          return w ? `${w}${f || ''}` : null;
-        })() ||
-        $('span.a-offscreen').first().text().trim() ||
-        null;
-      // Reattach symbol if missing
-      if (priceText && !/^[₹€£$A-Z]{1,3}/.test(priceText)) {
-        if (hostname.endsWith('.in')) priceText = `₹${priceText}`;
-        else if (hostname.endsWith('.co.uk')) priceText = `£${priceText}`;
-        else priceText = `$${priceText}`;
-      }
-    }
+    // 6) Load exchange rates
+    const ratesResp = await page.evaluate(async () => {
+      const r = await fetch('https://api.exchangerate.host/latest?base=EUR');
+      return r.json();
+    });
+    const rates = ratesResp.rates || {};
 
-    // b) eBay
-    if (!priceText && isEbay) {
-      priceText =
-        $('.display-price').text().trim() ||
-        $('.notranslate').first().text().trim() ||
-        null;
-    }
-
-    // c) JSON-LD fallback
-    if (!priceText && hasJsonLdProduct) {
-      $('script[type="application/ld+json"]').each((i, el) => {
-        if (priceText) return;
-        try {
-          const o = JSON.parse($(el).html());
-          if (o['@type'] === 'Product' && o.offers) {
-            priceText = `${o.offers.price}${o.offers.priceCurrency || ''}`;
-          }
-        } catch {}
-      });
-    }
-
-    // d) OpenGraph/Twitter
-    if (!priceText && hasOgPrice) {
-      const amt = $('meta[property="product:price:amount"]').attr('content');
-      const cur = $('meta[property="product:price:currency"]').attr('content');
-      priceText = amt && cur ? `${amt}${cur}` : null;
-    }
-
-    // e) Class-name heuristic
-    if (!priceText) {
-      const el = $('[class*="price"]')
-        .filter((i, el) => /\d/.test($(el).text()))
-        .first();
-      priceText = el.text().trim() || null;
-    }
-
-    // f) Fallback regex on body text
-    if (!priceText) {
-      const m = $('body')
-        .text()
-        .match(/([₹€£$]?\s?[\d.,\s]+(?:[A-Z]{3})?)/);
-      priceText = m ? m[0].trim() : null;
-    }
-
-    console.log(`[scrape] priceText → ${priceText}`);
-    if (!priceText) {
-      console.warn(`[scrape] skipping ${hostname}, no price detected`);
-      continue;
-    }
-
-    // 5) Parse & convert
-    const pr = extractPrice(priceText);
-    if (!pr) {
-      console.warn(`[scrape] failed to parse "${priceText}"`);
-      continue;
-    }
-
-    let { symbol, amount } = pr;
-    let price_eur = amount;
-    if (symbol !== '€' && rates) {
+    // 7) Parse & convert
+    results = items.map(({ link, thumbnail, priceText }) => {
+      const m = priceText.match(/([₹€$£])\s*([\d,\.]+)/);
+      const symbol = m?.[1] || '€';
+      const raw = m?.[2] || '0';
+      const amount = parseFloat(raw.replace(/,/g, '')) || 0;
       const cur =
         symbol === '$'
           ? 'USD'
@@ -219,19 +109,26 @@ async function googleReverseSearch(cropBuf, label) {
           ? 'GBP'
           : symbol === '₹'
           ? 'INR'
-          : /^[A-Z]{3}$/.test(symbol)
-          ? symbol
-          : null;
-      if (cur && rates[cur]) price_eur = amount / rates[cur];
-    }
-
-    results.push({
-      site: hostname,
-      url: pageUrl,
-      thumbnail: thumb,
-      price_eur: Number(price_eur.toFixed(2)),
+          : 'EUR';
+      const eur = cur === 'EUR' ? amount : amount / (rates[cur] || 1);
+      return {
+        site: new URL(link).hostname.replace(/^www\./, ''),
+        url: link,
+        thumbnail,
+        price_eur: Number(eur.toFixed(2)),
+      };
     });
-    console.log(`[scrape] success ${hostname} → €${price_eur.toFixed(2)}`);
+    console.log(`[lens] "${label}" → ${results.length} items`);
+  } catch (err) {
+    console.warn(`[lens] error for "${label}":`, err.message);
+    // fallback to Vision webDetection
+    results = await fallbackVision(cropBuf, label);
+  } finally {
+    if (page) await page.close();
+    if (browser) await browser.close();
+    try {
+      fs.unlinkSync(path.join(process.cwd(), 'tmp_lens.jpg'));
+    } catch {}
   }
 
   return results;
