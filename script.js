@@ -1,31 +1,17 @@
-console.log('👉 script.js loaded');
-
 document.addEventListener('DOMContentLoaded', () => {
   const log = (...args) => console.log('[Arcognition]', ...args);
 
-  // — UI ELEMENTS — use both ID and generic fallbacks
-  const fileInput =
-    document.querySelector('#fileInput') ||
-    document.querySelector('input[type="file"]');
-  const urlInput =
-    document.querySelector('#urlInput') ||
-    document.querySelector('input[type="text"], input[name="url"]');
-  const processBtn =
-    document.querySelector('#processBtn') ||
-    document.querySelector('button#processBtn, button[type="submit"], button');
-  const preview =
-    document.querySelector('#preview') ||
-    document.querySelector('img#preview, img.preview');
-  const canvas =
-    document.querySelector('#canvas') ||
-    document.querySelector('canvas#canvas, canvas');
-  const ctx = canvas?.getContext('2d');
-  const resultsBody =
-    document.querySelector('#resultsBody') ||
-    document.querySelector('tbody#resultsBody, tbody');
-  const downloadLink =
-    document.querySelector('#downloadLink') ||
-    document.querySelector('a#downloadLink, a.download');
+  // — UI ELEMENTS —
+  const fileInput = document.getElementById('fileInput');
+  const urlInput = document.getElementById('urlInput');
+  const processBtn = document.getElementById('processBtn');
+  const preview = document.getElementById('preview');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const resultsTable = document.getElementById('resultsTable');
+  const resultsBody = document.getElementById('resultsBody');
+  const downloadLink = document.getElementById('downloadLink');
+  const dropZone = document.getElementById('dropZone');
 
   if (
     !fileInput ||
@@ -34,20 +20,12 @@ document.addEventListener('DOMContentLoaded', () => {
     !preview ||
     !canvas ||
     !ctx ||
+    !resultsTable ||
     !resultsBody ||
-    !downloadLink
+    !downloadLink ||
+    !dropZone
   ) {
     console.error('[Arcognition] Missing required UI elements');
-    console.log({
-      fileInput,
-      urlInput,
-      processBtn,
-      preview,
-      canvas,
-      ctx,
-      resultsBody,
-      downloadLink,
-    });
     return;
   }
 
@@ -62,11 +40,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // — HELPERS —
   async function fetchJson(url, opts) {
     const res = await fetch(url, opts);
-    const text = await res.text();
+    const txt = await res.text();
     try {
-      return JSON.parse(text);
+      return JSON.parse(txt);
     } catch {
-      throw new Error(`Invalid JSON from ${url}: ${text}`);
+      throw new Error(`Invalid JSON from ${url}: ${txt}`);
     }
   }
 
@@ -94,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function reverseSearch(base64, annotations) {
     log(
-      'Calling reverse API with annotations:',
+      'Calling reverse API for:',
       annotations.map(a => a.name)
     );
     const res = await fetch(REVERSE_API, {
@@ -107,8 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
       throw new Error(`Reverse API error (${res.status}): ${body}`);
     }
     const json = await res.json();
-    log('Reverse API raw response:', json);
-
+    log('Reverse raw response:', json);
     const data = Array.isArray(json.data)
       ? json.data
       : Array.isArray(json.results)
@@ -127,16 +104,37 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // — EVENT HANDLER —
+  // — Drag & Drop support —
+  dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('border-blue-400');
+  });
+  dropZone.addEventListener('dragleave', e => {
+    dropZone.classList.remove('border-blue-400');
+  });
+  dropZone.addEventListener('drop', async e => {
+    e.preventDefault();
+    dropZone.classList.remove('border-blue-400');
+    if (e.dataTransfer.files.length) {
+      fileInput.files = e.dataTransfer.files;
+      preview.src = URL.createObjectURL(e.dataTransfer.files[0]);
+      preview.classList.remove('hidden');
+      canvas.classList.add('hidden');
+      resultsTable.classList.add('hidden');
+    }
+  });
+
+  // — PROCESS BUTTON HANDLER —
   processBtn.addEventListener('click', async e => {
     e.preventDefault();
     processBtn.disabled = true;
     resultsBody.innerHTML = '';
     downloadLink.classList.add('hidden');
+    resultsTable.classList.add('hidden');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     try {
-      // 1) Load image / preview
+      // 1) Load image → base64 & preview
       let base64;
       if (fileInput.files.length) {
         base64 = await getBase64FromFile(fileInput.files[0]);
@@ -150,6 +148,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       await new Promise(r => (preview.onload = r));
 
+      // Show preview & canvas
+      preview.classList.remove('hidden');
+      canvas.classList.remove('hidden');
+
+      // Draw on canvas
       const W = preview.naturalWidth,
         H = preview.naturalHeight;
       canvas.width = W;
@@ -158,12 +161,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 2) Detect
       const annotations = await detect(base64);
-      log('Detected annotations:', annotations);
+      log('Detected:', annotations);
       if (!annotations.length) {
         alert('No objects detected.');
         return;
       }
-      // draw boxes
       annotations.forEach(ann => {
         const v = ann.boundingPoly.normalizedVertices;
         const x = v[0].x * W,
@@ -177,12 +179,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 3) Reverse search
       const resultsArray = await reverseSearch(base64, annotations);
-      log('Parsed reverse search data:', resultsArray);
+      log('Search results:', resultsArray);
+
+      // Reveal the results table
+      resultsTable.classList.remove('hidden');
 
       // 4) Render
       const excelRows = [];
       resultsArray.forEach(({ object, reverse }) => {
-        log(`Rendering ${object}:`, reverse);
         if (!Array.isArray(reverse) || !reverse.length) {
           resultsBody.insertAdjacentHTML(
             'beforeend',
@@ -194,9 +198,9 @@ document.addEventListener('DOMContentLoaded', () => {
             resultsBody.insertAdjacentHTML(
               'beforeend',
               `<tr>
-                 <td>${object}</td>
-                 <td><a href="${item.url}" target="_blank">${item.site}</a></td>
-                 <td>€${item.price_eur}</td>
+                 <td class="px-4 py-2">${object}</td>
+                 <td class="px-4 py-2"><a href="${item.url}" target="_blank">${item.site}</a></td>
+                 <td class="px-4 py-2">€${item.price_eur}</td>
                </tr>`
             );
             excelRows.push({
