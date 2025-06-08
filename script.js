@@ -1,7 +1,11 @@
+// script.js
+
+console.log('👉 script.js loaded');
+
 document.addEventListener('DOMContentLoaded', () => {
   const log = (...args) => console.log('[Arcognition]', ...args);
 
-  // — UI ELEMENTS —
+  // UI elements
   const fileInput = document.getElementById('fileInput');
   const urlInput = document.getElementById('urlInput');
   const processBtn = document.getElementById('processBtn');
@@ -29,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  // — API ENDPOINTS —
+  // API endpoints
   const DOWNLOAD_API =
     'https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/download_image';
   const DETECT_API =
@@ -37,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const REVERSE_API =
     'https://arcognition-search-490571042366.us-central1.run.app/reverse';
 
-  // — HELPERS —
+  // Helpers
   async function fetchJson(url, opts) {
     const res = await fetch(url, opts);
     const txt = await res.text();
@@ -86,12 +90,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const json = await res.json();
     log('Reverse raw response:', json);
+
     const data = Array.isArray(json.data)
       ? json.data
       : Array.isArray(json.results)
       ? json.results
       : null;
     if (!data) throw new Error('Unexpected reverseSearch response shape');
+
+    // Each data[i] should now be:
+    // { object, reverse: [ { site, url, thumbnail, price_eur, title? } ... ] }
     return data;
   }
 
@@ -104,15 +112,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // — Drag & Drop support —
+  // Drag & Drop
   dropZone.addEventListener('dragover', e => {
     e.preventDefault();
     dropZone.classList.add('border-blue-400');
   });
-  dropZone.addEventListener('dragleave', e => {
+  dropZone.addEventListener('dragleave', () => {
     dropZone.classList.remove('border-blue-400');
   });
-  dropZone.addEventListener('drop', async e => {
+  dropZone.addEventListener('drop', e => {
     e.preventDefault();
     dropZone.classList.remove('border-blue-400');
     if (e.dataTransfer.files.length) {
@@ -124,17 +132,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // — PROCESS BUTTON HANDLER —
+  // Main handler
   processBtn.addEventListener('click', async e => {
     e.preventDefault();
     processBtn.disabled = true;
     resultsBody.innerHTML = '';
-    downloadLink.classList.add('hidden');
     resultsTable.classList.add('hidden');
+    downloadLink.classList.add('hidden');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     try {
-      // 1) Load image → base64 & preview
+      // 1) Load image
       let base64;
       if (fileInput.files.length) {
         base64 = await getBase64FromFile(fileInput.files[0]);
@@ -148,11 +156,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       await new Promise(r => (preview.onload = r));
 
-      // Show preview & canvas
+      // Show preview + canvas
       preview.classList.remove('hidden');
       canvas.classList.remove('hidden');
-
-      // Draw on canvas
       const W = preview.naturalWidth,
         H = preview.naturalHeight;
       canvas.width = W;
@@ -178,39 +184,50 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       // 3) Reverse search
-      const resultsArray = await reverseSearch(base64, annotations);
-      log('Search results:', resultsArray);
+      const data = await reverseSearch(base64, annotations);
+      log('Search data:', data);
 
-      // Reveal the results table
+      // Show results table
       resultsTable.classList.remove('hidden');
 
-      // 4) Render
+      // 4) Render rows
       const excelRows = [];
-      resultsArray.forEach(({ object, reverse }) => {
-        if (!Array.isArray(reverse) || !reverse.length) {
-          resultsBody.insertAdjacentHTML(
-            'beforeend',
-            `<tr><td>${object}</td><td colspan="2">No matches</td></tr>`
-          );
-          excelRows.push({ Item: object, Site: '', Price: '', Link: '' });
-        } else {
-          reverse.slice(0, 5).forEach(item => {
-            resultsBody.insertAdjacentHTML(
-              'beforeend',
-              `<tr>
-                 <td class="px-4 py-2">${object}</td>
-                 <td class="px-4 py-2"><a href="${item.url}" target="_blank">${item.site}</a></td>
-                 <td class="px-4 py-2">€${item.price_eur}</td>
-               </tr>`
-            );
-            excelRows.push({
-              Item: object,
-              Site: item.site,
-              Price: item.price_eur,
-              Link: item.url,
-            });
+      data.forEach(({ object, reverse }) => {
+        reverse.slice(0, 5).forEach(item => {
+          // item: { site, url, thumbnail, price_eur, title? }
+          const title = item.title || object;
+          const thumb = item.thumbnail || '';
+          const row = `
+            <tr class="border-t">
+              <td class="px-4 py-2">
+                ${
+                  thumb
+                    ? `<img src="${thumb}" class="h-12 w-12 object-cover rounded" />`
+                    : '—'
+                }
+              </td>
+              <td class="px-4 py-2">${title}</td>
+              <td class="px-4 py-2">
+                <a href="${
+                  item.url
+                }" target="_blank" class="text-blue-600 hover:underline">
+                  ${item.site}
+                </a>
+              </td>
+              <td class="px-4 py-2">${
+                item.price_eur != null ? '€' + item.price_eur : '—'
+              }</td>
+            </tr>`;
+          resultsBody.insertAdjacentHTML('beforeend', row);
+
+          excelRows.push({
+            Thumbnail: thumb,
+            Title: title,
+            Site: item.site,
+            Price: item.price_eur,
+            Link: item.url,
           });
-        }
+        });
       });
 
       // 5) Excel export
