@@ -1,137 +1,58 @@
-// src/modules/googleReverseImageSearch.js
+const axios = require("axios");
+const cheerio = require("cheerio");
+const {
+  SuccessResponseObject,
+  ErrorResponseObject,
+} = require("../common/http");
 
-const puppeteer = require('puppeteer');
-const fs = require('fs');
-const path = require('path');
-const vision = require('@google-cloud/vision');
-
-const visionClient = new vision.ImageAnnotatorClient();
-
-/**
- * Launch a headless browser with desktop emulation.
- */
-async function launchBrowser() {
-  return puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    defaultViewport: { width: 1280, height: 800 },
-  });
-}
-
-/**
- * Convert Vision webDetection pages if Lens fails.
- */
-async function fallbackVision(cropBuf, label) {
-  console.warn(`[lens] Falling back to Vision webDetection for "${label}"`);
-  const [vd] = await visionClient.webDetection({ image: { content: cropBuf } });
-  return (vd.webDetection.pagesWithMatchingImages || []).slice(0, 5).map(p => ({
-    site: new URL(p.url || p).hostname.replace(/^www\./, ''),
-    url: p.url || p,
-    thumbnail: vd.webDetection.fullMatchingImages?.[0]?.url || null,
-    price_eur: null,
-  }));
-}
-
-/**
- * Reverse‐image search via Google Lens UI in Puppeteer.
- */
-async function googleReverseSearch(cropBuf, label) {
-  console.log(`[lens] "${label}" → launching browser`);
-  let browser,
-    page,
-    results = [];
-
+async function reverse(imageUrl) {
   try {
-    browser = await launchBrowser();
-    page = await browser.newPage();
-    // Emulate a real browser
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
-        'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-        'Chrome/114.0.0.0 Safari/537.36'
-    );
+    const headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Linux; Android 6.0.1; SM-G920V Build/MMB29K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.98 Mobile Safari/537.36",
+    };
+    const url = `https://images.google.com/searchbyimage?safe=off&sbisrc=tg&image_url=${imageUrl}`;
+    const response = await axios.get(url, { headers, maxRedirects: 20 });
 
-    // 1) Go to Lens
-    await page.goto('https://lens.google.com/upload', {
-      waitUntil: 'networkidle2',
-    });
+    const $ = cheerio.load(response.data);
+    const result = { similarUrl: "", resultText: "" };
 
-    // 2) Upload the image
-    const tmpFile = path.join(process.cwd(), 'tmp_lens.jpg');
-    fs.writeFileSync(tmpFile, cropBuf);
-    const input = await page.$('input[type=file]');
-    if (!input) throw new Error('Lens file input not found');
-    await input.uploadFile(tmpFile);
+    const similarInput = $(".gLFyf").first();
+    if (similarInput.length) {
+      const similarImage = similarInput.attr("value");
+      const similarUrl = `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(
+        similarImage
+      )}`;
+      result.similarUrl = similarUrl;
+    } else {
+      return new ErrorResponseObject("Failed to find similar images");
+    }
 
-    // 3) Wait for URL change to results page
-    await page.waitForFunction(() => location.pathname.startsWith('/results'), {
-      timeout: 20000,
-    });
+    const outputDiv = $("div.r5a77d").first();
+    if (outputDiv.length) {
+      const output = outputDiv.text();
+      let decodedText = unescape(encodeURIComponent(output));
 
-    // 4) Wait for the shopping-results container to appear
-    await page.waitForSelector('c-wiz[section-type="shopping_results"]', {
-      timeout: 20000,
-    });
+      if (decodedText.includes("Â")) {
+        decodedText = decodedText.replace(/Â/g, " ");
+      }
+      result.resultText = decodedText;
+    } else {
+      return new ErrorResponseObject("Failed to find text output");
+    }
 
-    // 5) Extract up to 5 items
-    const items = await page.$$eval(
-      'c-wiz[section-type="shopping_results"] .sh-dgr__container',
-      nodes =>
-        nodes.slice(0, 5).map(n => {
-          const linkEl = n.querySelector('a[href]');
-          const imgEl = n.querySelector('img[src]');
-          const priceEl = n.querySelector('.T14wmb, .sh-dgr__price');
-          return {
-            link: linkEl?.href || null,
-            thumbnail: imgEl?.src || null,
-            priceText: priceEl?.textContent.trim() || '',
-          };
-        })
-    );
-
-    // 6) Load exchange rates
-    const ratesResp = await page.evaluate(async () => {
-      const r = await fetch('https://api.exchangerate.host/latest?base=EUR');
-      return r.json();
-    });
-    const rates = ratesResp.rates || {};
-
-    // 7) Parse & convert
-    results = items.map(({ link, thumbnail, priceText }) => {
-      const m = priceText.match(/([₹€$£])\s*([\d,\.]+)/);
-      const symbol = m?.[1] || '€';
-      const raw = m?.[2] || '0';
-      const amount = parseFloat(raw.replace(/,/g, '')) || 0;
-      const cur =
-        symbol === '$'
-          ? 'USD'
-          : symbol === '£'
-          ? 'GBP'
-          : symbol === '₹'
-          ? 'INR'
-          : 'EUR';
-      const eur = cur === 'EUR' ? amount : amount / (rates[cur] || 1);
-      return {
-        site: new URL(link).hostname.replace(/^www\./, ''),
-        url: link,
-        thumbnail,
-        price_eur: Number(eur.toFixed(2)),
-      };
-    });
-    console.log(`[lens] "${label}" → ${results.length} items`);
-  } catch (err) {
-    console.warn(`[lens] error for "${label}":`, err.message);
-    // fallback to Vision webDetection
-    results = await fallbackVision(cropBuf, label);
-  } finally {
-    if (page) await page.close();
-    if (browser) await browser.close();
-    try {
-      fs.unlinkSync(path.join(process.cwd(), 'tmp_lens.jpg'));
-    } catch {}
+    return new SuccessResponseObject("Successfully Got the Result", result);
+  } catch (error) {
+    return new ErrorResponseObject(`Failed to reverse image: ${error.message}`);
   }
-
-  return results;
 }
 
-module.exports = { googleReverseSearch };
+module.exports = {
+  reverse,
+};
+
+// For Testing
+/* reverse("https://graph.org/file/1668e5e51e612341b945e.jpg")
+  .then((result) => console.log(result["success"]))
+  .catch((error) => console.error(error.message));
+ */

@@ -16,11 +16,8 @@ Use it to identify pieces from moodboards, real rooms, or 3D renders and quickly
 ---
 
 ### ⚙️ For Developers
-• Vision detection and URL→base64 proxy run on Supabase Edge Functions:
-  • `detect` → https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/detect
-  • `download_image` → https://kwyictzrlgvuqtbxsxgz.supabase.co/functions/v1/download_image
-• Reverse image search runs on Cloud Run (`/reverse`).
-• No keys or setup required for end-users.
+The backend pipeline runs on Google Cloud Run and internally uses Supabase Edge Functions
+for object detection and image download. Reverse image search also runs on Cloud Run.
 
 #### Deployment
 To build and deploy the reverse search API to Cloud Run:
