@@ -1,28 +1,16 @@
 # Arcognition
 
-Arcognition is a simple online tool that finds furniture from any room image and gathers shopping links.
-
 [**Open Arcognition**](https://shinsekami.github.io/Arcognition)
 
-## How to use
-1. Open **https://shinsekami.github.io/Arcognition**
-2. Upload an image **or** paste an image URL.
-3. Click **Process** and wait a few seconds while items are detected.
-4. Review the highlighted objects and matching links.
-5. Click **Download Excel Report** to save the results.
+Arcognition lets you upload or link to any room photo and quickly see matching furniture listings. Everything runs in the browser using Supabase functions for detection and a Cloud Run service for reverse image search.
 
-Use it to identify pieces from moodboards, real rooms, or 3D renders and quickly compare prices.
+## How to use
+1. Open the link above.
+2. Upload an image **or** paste an image URL.
+3. Click **Process** and wait a moment.
+4. Review the detected items and links.
+5. Click **Download Excel Report** to save the spreadsheet.
 
 ---
-
 ### ⚙️ For Developers
-The backend pipeline runs on Google Cloud Run and internally uses Supabase Edge Functions
-for object detection and image download. Reverse image search also runs on Cloud Run.
-
-#### Deployment
-To build and deploy the reverse search API to Cloud Run:
-
-```bash
-gcloud builds submit --config cloudbuild.yaml .
-```
-This containerizes `reverse_image_api/` and deploys it as the `arcognition-search` service in `us-central1`.
+The public front end calls two Supabase Edge functions (`detect` and `download_image`) plus a Cloud Run `/reverse` service. No local setup is required.
